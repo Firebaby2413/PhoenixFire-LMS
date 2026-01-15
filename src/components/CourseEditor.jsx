@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import MarkdownPreview from "./MarkdownPreview";
+import "../App.css";
+
 
 function newId() {
   if (typeof crypto !== "undefined" && crypto?.randomUUID) return crypto.randomUUID();
@@ -80,6 +82,7 @@ export default function CourseEditor({ course, onSave, onCancel }) {
                   title: "New Module",
                   content: "",
                   assignment: {
+                    repoUrl: "",
                     instructionsText: "",
                     instructionsVideoUrl: "",
                     submissions: [],
@@ -133,111 +136,58 @@ export default function CourseEditor({ course, onSave, onCancel }) {
 
   return (
     <div
-      style={{
-        background: "#0f172a",
-        color: "#e5e7eb",
-        border: "1px solid #334155",
-        padding: 14,
-        borderRadius: 14,
-      }}
+      className="course-box"
     >
         <h2 style={{ marginTop: 0, color: "#f59e0b" }}>Edit Course</h2>
+        <div className="card">
+          <label className="help-text">Title</label>
+          <input
+            className="input-wide"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
 
-      <label style={{ fontWeight: 800 }}>Title</label>
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        style={{
-          width: "100%",
-          marginBottom: 10,
-          padding: 10,
-          borderRadius: 10,
-          border: "1px solid #334155",
-          background: "#111827",
-          color: "#e5e7eb",
-        }}
-      />
-
-       <label style={{ fontWeight: 800 }}>Description</label>
-      <textarea
-        value={description}
-        onChange={(e) => setDescription(e.target.value)}
-        style={{
-          width: "100%",
-          minHeight: 90,
-          marginBottom: 12,
-          padding: 10,
-          borderRadius: 10,
-          border: "1px solid #334155",
-          background: "#111827",
-          color: "#e5e7eb",
-        }}
-      />
-
+          <label className="help-text">Description</label>
+          <textarea
+            className="input-wide"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+        </div>
       <h3 style={{ color: "#60a5fa" }}>Lessons</h3>
 
       {lessons.length === 0 && <p>No lessons yet.</p>}
 
       {lessons.map((lesson) => (
         <div
+          className="lesson-box"
           key={lesson.id}
-          style={{
-            border: "1px solid #334155",
-            padding: 12,
-            borderRadius: 14,
-            marginBottom: 12,
-            background: "#111827",
-          }}
         >
           <input
+            className="input-wide"
             value={lesson.title}
             onChange={(e) =>
               updateLessonField(lesson.id, "title", e.target.value)
             }
-            style={{
-              width: "100%",
-              marginBottom: 6,
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid #334155",
-              background: "#0b1220",
-              color: "#e5e7eb",
-              fontWeight: 800,
-            }}
           />
 
            <textarea
+            className="input-wide"
             value={lesson.description || ""}
             onChange={(e) =>
               updateLessonField(lesson.id, "description", e.target.value)
             }
             placeholder="Lesson description (optional)"
-            style={{
-              width: "100%",
-              minHeight: 70,
-              marginBottom: 8,
-              padding: 10,
-              borderRadius: 10,
-              border: "1px solid #334155",
-              background: "#0b1220",
-              color: "#e5e7eb",
-            }}
           />
 
-          <button
-            onClick={() => deleteLesson(lesson.id)}
-            style={{
-              background: "#ef4444",
-              color: "#0b1220",
-              border: "none",
-              padding: "8px 12px",
-              borderRadius: 10,
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-             Delete Lesson
-          </button>
+          <div className="course-actions">
+            <button
+              onClick={() => deleteLesson(lesson.id)}
+              className="btn-outline btn-danger"
+            >
+              Delete Lesson
+            </button>
+          </div>
 
           <h4 style={{ marginTop: 14, color: "#a855f7" }}>Modules</h4>
 
@@ -245,96 +195,125 @@ export default function CourseEditor({ course, onSave, onCancel }) {
 
           {(lesson.modules || []).map((mod) => (
             <div
+              className="module-box"
               key={mod.id}
-              style={{
-                border: "1px dashed #475569",
-                padding: 12,
-                borderRadius: 14,
-                marginBottom: 10,
-                background: "#0b1220",
-              }}
             >
               <input
+                className="input-wide"
                 value={mod.title}
                 onChange={(e) =>
                   updateModule(lesson.id, mod.id, "title", e.target.value)
                 }
-                style={{
-                  width: "100%",
-                  marginBottom: 6,
-                  padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #334155",
-                  background: "#111827",
-                  color: "#e5e7eb",
-                  fontWeight: 800,
-                }}
               />
 
               <textarea
+                className="input-wide"
                 value={mod.content}
                 onChange={(e) =>
                   updateModule(lesson.id, mod.id, "content", e.target.value)
                 }
                 placeholder="Module content (Markdown supported)"
-                style={{
-                  width: "100%",
-                  minHeight: 100,
-                  padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #334155",
-                  background: "#111827",
-                  color: "#e5e7eb",
-                }}
               />
 
               <MarkdownPreview markdown={mod.content} />
 
-              {/* Assignment (ONE per module) */}
-              <h5 style={{ marginTop: 12, color: "#f97316" }}>
-                Assignment Instructions
-              </h5>
+              <div
+                className="card"
+              >
+                <h5 className="assignment-title">
+                  Assignment (Student Work)
+                </h5>
 
-              <textarea
-                placeholder="Assignment instructions (text / Markdown supported)"
-                value={mod.assignment?.instructionsText || ""}
-                onChange={(e) =>
-                  updateModule(lesson.id, mod.id, "assignment", {
-                    ...(mod.assignment || {}),
-                    instructionsText: e.target.value,
-                  })
-                }
-                style={{
-                  width: "100%",
-                  minHeight: 90,
-                  padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #334155",
-                  background: "#111827",
-                  color: "#e5e7eb",
-                  marginBottom: 8,
-                }}
-              />
+                {/* Starter Repo */}
+                <input
+                  placeholder="Starter Github repository URL (students clone this)"
+                  value={mod.assignment?.repoUrl || ""}
+                  onChange={(e) => {
+                    const repoUrl = e.target.value;
+                    setLessons((prev) =>
+                      prev.map((l) =>
+                        l.id === lesson.id
+                          ? {
+                            ...l,
+                            modules: l.modules.map((m) =>
+                              m.id === mod.id
+                                ? {
+                                  ...m,
+                                  assignment: {
+                                    ...(m.assignment || {}),
+                                    repoUrl,
+                                  },
+                                }
+                                : m
+                            ),
+                          }
+                          : l
+                      )
+                    );
+                  }}
+                  style={{ width: "100%", marginBottom: 8 }}
+                />
 
-              <input
-                placeholder="Assignment video URL (optional)"
-                value={mod.assignment?.instructionsVideoUrl || ""}
-                onChange={(e) =>
-                  updateModule(lesson.id, mod.id, "assignment", {
-                    ...(mod.assignment || {}),
-                    instructionsVideoUrl: e.target.value,
-                  })
-                }
-                style={{
-                  width: "100%",
-                  padding: 10,
-                  borderRadius: 10,
-                  border: "1px solid #334155",
-                  background: "#111827",
-                  color: "#e5e7eb",
-                  marginBottom: 8,
-                }}
-              />
+                {/* Instructions (Markdown) */}
+                <textarea
+                  placeholder="Assignment instructions (Markdown supported)"
+                  value={mod.assignment?.instructionsText || ""}
+                  onChange={(e) => {
+                    const instructionsText = e.target.value;
+                    setLessons((prev) =>
+                      prev.map((l) =>
+                        l.id === lesson.id
+                          ? {
+                            ...l,
+                            modules: l.modules.map((m) =>
+                              m.id === mod.id
+                                ? {
+                                  ...m,
+                                  assignment: {
+                                    ...(m.assignment || {}),
+                                    instructionsText,
+                                  },
+                                }
+                                : m
+                            ),
+                          }
+                          : l
+                      )
+                    );
+                  }}
+                  style={{ width: "100%", minHeight: 80, marginBottom: 8 }}
+                />
+
+                {/* Optional Video */}
+                <input
+                  placeholder="Instruction Video URL (optional)"
+                  value={mod.assignment?.instructionVideoUrl || ""}
+                  onChange={(e) => {
+                    const instructionsVideoUrl = e.target.value;
+                    setLessons((prev) =>
+                      prev.map((l) =>
+                        l.id === lesson.id
+                          ? {
+                            ...l,
+                            modules: l.modules.map((m) =>
+                              m.id === mod.id
+                                ? {
+                                  ...m,
+                                  assignment: {
+                                    ...(m.assignment || {}),
+                                    instructionsVideoUrl,
+                                  },
+                                }
+                                : m
+                            ),
+                          }
+                          : l
+                      )
+                    );
+                  }}
+                  style={{ width: "100%" }}
+                />
+              </div>
 
               <button
                 onClick={() => deleteModule(lesson.id, mod.id)}
@@ -353,7 +332,7 @@ export default function CourseEditor({ course, onSave, onCancel }) {
             </div>
           ))}
 
-          button
+          <button
             onClick={() => addModule(lesson.id)}
             style={{
               background: "#22c55e",
@@ -365,59 +344,35 @@ export default function CourseEditor({ course, onSave, onCancel }) {
               cursor: "pointer",
             }}
           >
-            + Add Module
+            Add Module
           </button>
         </div>
       ))}
 
       <button
+        className="btn"
         onClick={addLesson}
-        style={{
-          background: "#3b82f6",
-          color: "#0b1220",
-          border: "none",
-          padding: "10px 14px",
-          borderRadius: 10,
-          fontWeight: 900,
-          cursor: "pointer",
-        }}
       >
-         Add Lesson
+        Add Lesson
       </button>
 
       <hr style={{ margin: "16px 0", borderColor: "#334155" }} />
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <div className="course-actions">
         <button
+          className="btn"
           onClick={saveCourse}
-          style={{
-            background: "#f59e0b",
-            color: "#0b1220",
-            border: "none",
-            padding: "10px 14px",
-            borderRadius: 10,
-            fontWeight: 900,
-            cursor: "pointer",
-          }}
         >
           Save Course
         </button>
 
         <button
+          className="btn-secondary"
           onClick={onCancel}
-          style={{
-            background: "#334155",
-            color: "#e5e7eb",
-            border: "none",
-            padding: "10px 14px",
-            borderRadius: 10,
-            fontWeight: 900,
-            cursor: "pointer",
-          }}
         >
           Cancel
         </button>
-         </div>
+      </div>
     </div>
   );
 }

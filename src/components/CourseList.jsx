@@ -1,4 +1,5 @@
 import { calculateCourseProgress } from "../utils/progress";
+import "../styles.css";
 
 export default function CourseList({
     courses,
@@ -8,25 +9,19 @@ export default function CourseList({
     onCreateCourse,
     onOpenCourse,
     onEditCourse,
-    onDeleteCourse,
+    onDeleteCourse
 }) {
+
+    const studentKey = 
+        currentUser?.studentId ??
+        currentUser?.email ??
+        currentUser?.username;
+
     return (
         <div>
-            {/* STAFF: Create Course at the top (NOT inside a lesson) */}
+            {/* STAFF: Create Course  */}
             {isStaff && (
-                <button
-                    onClick={onCreateCourse}
-                    style={{
-                        background: "#f97316", //orange
-                        color: "#111827",
-                        border: "none",
-                        padding: "10px 14px",
-                        borderRadius: 10,
-                        fontWeight: 800,
-                        marginBottom: 16,
-                        cursor: "pointer",
-                    }}
-                >
+                <button className="btn" onClick={onCreateCourse}>
                     Create Course
                 </button>
             )}
@@ -34,99 +29,49 @@ export default function CourseList({
             {courses.length === 0 && <p>No courses yet.</p>}
 
             {courses.map((course) => {
-                const percent = isStudent
-                    ? calculateCourseProgress(course, currentUser.username)
-                    : null;
+                const percent = 
+                    isStudent && studentKey
+                        ? calculateCourseProgress(course, studentKey)
+                        : 0;
                 
                 return (
-                    <div
-                        key={course.id}
-                        style={{
-                            background: "#111827", // dark gray
-                            color: "#e5e7eb",
-                            border: "1px solid #374151",
-                            padding: 14,
-                            marginBottom: 12,
-                            borderRadius: 14,
-                        }}
-                    >
-                        <h3 style={{ margin: "0 0 6px 0", color: "#f472b6" /* pink */ }}>
-                            {course.title}
-                        </h3>
-                        <p style={{ marginTop: 0, color: "#cbd5e1" }}>
-                            {course.description}
-                        </p>
-
+                    <div key={course.id} className="course-box">
+                        <h3 className="pf-title">{course.title}</h3>
+                        <p>{course.description}</p>
+                        
+                        {/* STUDENT PROGRESS */}
                         {isStudent && (
-                            <div style={{ marginBottom: 10 }}>
-                                <div
-                                    style={{
-                                        background: "#334155",
-                                        height: 12,
-                                        borderRadius: 999,
-                                        overflow: "hidden",
-                                        marginBottom: 6,
-                                    }}
-                                >
+                            <div className="course-progress">
+                                <div className="course-progress-bar">
                                     <div
+                                        className="course-progress-fill"
                                         style={{
                                             width: `${percent}%`,
-                                            background: percent === 100 ? "#22c55e" : "#3b82f6", // green / blue
-                                            height: "100%",
+                                            background:
+                                            percent === 100 
+                                            ? "var(--magic-blue)"
+                                            : "var(--sky-blue)",
                                         }}
                                     />
                                 </div>
-                                <small style={{ color: "35e7eb" }}>
+                                <small>
                                     {percent}% complete {percent === 100 ? "🏅" : ""}
                                 </small>
                             </div>
                         )}
 
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                            <button
-                                onClick={() => onOpenCourse(course)}
-                                style={{
-                                    background: "#3b82f6",
-                                    color: "#0b1220",
-                                    border: "none",
-                                    padding: "8px 12px",
-                                    borderRadius: 10,
-                                    fontWeight: 800,
-                                    cursor: "pointer",
-                                }}
-                            >
+                        <div className="course-actions">
+                            <button className="btn btn-inline" onClick={() => onOpenCourse(course)}>
                                 Open Course
                             </button>
 
                             {isStaff && (
                                 <>
-                                    <button
-                                        onClick={() => onEditCourse(course)}
-                                        style={{
-                                            background: "#a855f7",
-                                            color: "#0b1220",
-                                            border: "none",
-                                            padding: "8px 12px",
-                                            borderRadius: 10,
-                                            fontWeight: 800,
-                                            cursor: "pointer",
-                                        }}
-                                    >
+                                    <button className="btn-secondary btn-inline" onClick={() => onEditCourse(course)}>
                                         Edit
                                     </button>
 
-                                    <button
-                                        onClick={() => onDeleteCourse(course)}
-                                        style={{
-                                            background: "#ef4444",
-                                            color: "#0b1220",
-                                            border: "none",
-                                            padding: "8px 12px",
-                                            borderRadius: 10,
-                                            fontWeight: 800,
-                                            cursor: "pointer",
-                                        }}
-                                    >
+                                    <button className="btn-secondary btn-inline" onClick={() => onDeleteCourse(course)}>
                                         Delete
                                     </button>
                                 </>

@@ -1,0 +1,459 @@
+/* ============= RESET ============= */
+* {
+  box-sizing: border-box;
+}
+
+
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  transition: background 0.3s, color 0.3s;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+
+/* ============= THEME COLORS (from your logo) ============= */
+:root {
+  --phoenix-orange: #ff6a00;
+  --phoenix-pink: #ff4da6;
+  --phoenix-purple: #6d28d9;
+  --magic-blue: #0ea5e9;
+  --sky-blue: #60a5fa;
+  --slate-gray: #1f2937;
+
+  --dark-bg: #050816;
+  --dark-panel: #0b1120;
+  --dark-card: #020617;
+
+  --light-bg: #d4d4d8; /* soft gray, not pure white */
+  --light-panel: #e5e7eb;
+  --light-card: #f3f4f6;
+}
+
+/* ============= DARK / LIGHT MODES ============= */
+body.dark {
+  background: radial-gradient(circle at top, #1f2937 0, var(--dark-bg) 50%);
+  color: #f9fafb;
+}
+
+body.light {
+  background: var(--light-bg);
+  color: #111827;
+}
+
+/* Dark-mode panels */
+body.dark #auth-card,
+body.dark #content,
+body.dark .course-box,
+body.dark .lesson-box,
+body.dark .module-box,
+body.dark .card {
+  background: var(--dark-card);
+  border: 1px solid #111827;
+}
+
+/* Light-mode panels */
+body.light #auth-card,
+body.light .card {
+  background: var(--light-card);
+  border: 1px solid #cbd5f5;
+}
+
+body.light #content,
+body.light .course-box,
+body.light .lesson-box,
+body.light .module-box {
+  background: var(--light-card);
+  border: 1px solid #d1d5db;
+}
+
+/* Utility */
+.hidden {
+  display: none !important; 
+}
+
+/* React Bridge/ Utility classes */
+.pf-card,
+.course-card,
+.lesson-card,
+.module-card {
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--phoenix-orange);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+.pf-title {
+  background: linear-gradient(
+    120deg,
+    var(--phoenix-orange),
+    var(--phoenix-pink),
+    var(--magic-blue)
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  font-weight: bold;
+}
+
+/* Badges */
+.badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.badge-pending {
+  background: var(--phoenix-purple);
+  color: #fff;
+}
+
+.badge.revision {
+  background: var(--phoenix-orange);
+  color: #111827;
+}
+
+.badge.approved {
+  background: var(--magic-blue);
+  color: #020617;
+}
+
+/* Submission UI helpers */
+.submission-box {
+  margin-top: 14px;
+}
+
+.feedback-box {
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid var(--phoenix-purple);
+  background: var(--dark-panel);
+}
+
+/* Progress */
+.course-progress {
+  margin-bottom: 12px;
+}
+
+.course-progress-bar {
+  background: #334155;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.course-progress-fill {
+  height: 100%;
+}
+
+/* Inline action buttons */
+.course-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn-inline {
+  width: auto;
+  margin-top: 0;
+}
+/* ============= AUTH (LOGIN / CREATE ACCOUNT) ============= */
+#auth-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+#auth-card {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  background: var(--dark-card);
+  padding: 24px 24px 28px;
+  border-radius: 18px;
+  border: 2px solid var(--phoenix-orange);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.75);
+}
+
+#auth-card h2 {
+  text-align: center;
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+#auth-card .btn,
+#auth-card .btn-secondary {
+  text-align: center;
+}
+
+#auth-card .input-wide {
+  margin-top: 10px;
+}
+/* theme toggle inside card */
+.theme-toggle {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  border: none;
+  background: transparent;
+  color: var(--phoenix-orange);
+  cursor: pointer;
+  font-size: 18px;
+}
+
+.auth-logo {
+  display: block;
+  margin: 0 auto 16px;
+  width: 150px;
+  max-width: 60%;
+  border-radius: 12px;
+}
+
+/* Bold gradient title, like logo colors */
+.app-title {
+  text-align: center;
+  margin: 0 0 20px;
+  font-size: 26px;
+  font-weight: bold;
+  background: linear-gradient(
+    120deg,
+    var(--phoenix-orange),
+    var(--phoenix-pink),
+    var(--magic-blue)
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+
+/* Auth headings */
+#signin-form h2,
+#create-form h2 {
+  margin: 0 0 12px;
+  text-align: center;
+}
+
+/* Inputs */
+.input-wide {
+  width: 100%;
+  padding: 10px 11px;
+  margin-top: 10px;
+  border-radius: 10px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #f9fafb;
+}
+
+.input-wide:focus {
+  border-color: var(--phoenix-orange);
+  outline: 2px solid var(--phoenix-orange);
+  outline-offset: 1px;
+}
+
+/* Buttons */
+/* BUTTONS */
+.btn {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(
+    120deg,
+    var(--phoenix-orange),
+    var(--phoenix-pink),
+    var(--magic-blue)
+  );
+  color: #111827;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  transition: filter 0.2s ease-in-out;
+}
+
+.btn:hover {
+  filter: brightness(1.15);
+}
+
+.btn-secondary {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 2px solid var(--phoenix-orange);
+  background: transparent;
+  color: var(--phoenix-orange);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 106, 0, 0.2);
+  color: #fff;
+}
+
+
+/* ============= APP LAYOUT AFTER LOGIN ============= */
+#layout {
+  display: flex;
+  height: 100vh;
+}
+
+/* SIDEBAR */
+#sidebar {
+  width: 260px;
+  background: radial-gradient(
+    circle at top,
+    rgba(148, 27, 139, 0.25) 0,
+    var(--slate-gray) 40%,
+    #020617 90%
+  );
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sidebar header */
+.sidebar-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.6);
+}
+
+.sidebar-logo-img {
+  width: 120px;
+  border-radius: 14px;
+  margin-bottom: 6px;
+}
+
+.sidebar-logo-text {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e5e7eb;
+}
+
+/* Sidebar buttons */
+.sidebar-btn {
+  width: 100%;
+  text-align: left;
+  margin: 4px 0;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: transparent;
+  border: 1px solid rgba(248, 250, 252, 0.05);
+  color: #e5e7eb;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.sidebar-btn:hover {
+  border-color: var(--phoenix-orange);
+  background: rgba(255, 106, 0, 0.18);
+}
+
+/* Sidebar user info */
+.sidebar-user {
+  margin-bottom: 10px;
+}
+
+.sidebar-username {
+  font-size: 13px;
+}
+
+.sidebar-role {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Logout accent */
+.sidebar-logout {
+  margin-top: auto;
+  border-color: #ef4444;
+  color: #fecaca;
+}
+
+.sidebar-logout:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+/* ============= MAIN CONTENT AREA ============= */
+#content {
+  flex: 1;
+  padding: 20px;
+  overflow-y: auto;
+}
+
+/* Section container (centered content width) */
+.section-container {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+/* CARD for placeholder screens */
+.card {
+  padding: 18px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+/* Courses, lessons, modules (when you re-layer full logic) */
+.course-box,
+.lesson-box,
+.module-box {
+  padding: 16px;
+  margin-bottom: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--phoenix-orange);
+  background: rgba(15, 23, 42, 0.9);
+}
+
+
+.module-markdown h1,
+.module-markdown h2,
+.module-markdown h3 {
+  margin-top: 1em;
+}
+
+.module-markdown code {
+  background: rgba(0,0,0,0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.module-preview summary {
+  cursor: pointer;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.module-markdown pre {
+  background: #020617;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.module-markdown a {
+  color: var(--magic-blue);
+  text-decoration: underline;
+}

@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
+
 import MarkdownPreview from "./components/MarkdownPreview";
 import CourseEditor from "./components/CourseEditor";
 import Sidebar from "./components/Sidebar";
 import CourseList from "./components/CourseList";
 import LessonView from "./components/LessonView";
+import SubmissionsDashboard from "./components/SubmissionsDashboard";
+import StudentProgressBoard from "./components/StudentProgressBoard";
+
 import { calculateCourseProgress } from "./utils/progress";
-import "./App.css";
+import * as storage from "./utils/storage.js";
+import * as auth from "./utils/authService.js";
+
+import "./styles.css";
 
 /* =====================
   CONSTANTS
@@ -33,7 +40,17 @@ function normalizeCourses(courses) {
       ...lesson,
       modules: (lesson.modules || []).map((mod) => {
         // Already new shape:
-        if (mod.assignment) return mod;
+        if (mod.assignment) {
+          if (
+            mod.assignment.submission &&
+            !mod.assignment.submissions
+          ) {
+            mod.assignment.submissions = mod.assignment.submission;
+            delete mod.assignment.submission;
+          }
+          return mod;
+        }
+          
 
         // Old: assignments array
         const a0 = Array.isArray(mod.assignments) ? mod.assignments[0] : null;
@@ -54,23 +71,37 @@ function normalizeCourses(courses) {
   }));
 }
 
-function canAccessModuleByPrereq(lesson, modIndex, studentUsername) {
-  if (modIndex === 0) return true;
-  const prev = lesson.modules?.[modIndex - 1];
-  const a = prev?.assignment;
-  if (!a) return false;
-  return (a.submissions || []).some(
-    (s) => s.student === studentUsername && s.status === "approved"
+function matchesStudent(submissionStudent, user) {
+  if (!submissionStudent || !user) return false;
+  return (
+    submissionStudent === user?.studentId ||
+    submissionStudent === user?.email ||
+    submissionStudent === user?.username
   );
 }
 
-function isLessonCompletedForStudent(lesson, studentUsername) {
-  const mods = lesson?.modules || [];
-  if (mods.length === 0) return false;
 
-  return mods.every((m) =>
-    (m.assignment?.submissions || []).some(
-      (s) => s.student === studentUsername && s.status === "approved"
+function canAccessModuleByPrereq(lesson, modIndex, currentUser) {
+  if (modIndex === 0) return true;
+
+  const prevModule = lesson.modules?.[modIndex - 1];
+  const assignment = prevModule?.assignment;
+  if (!assignment) return false;
+
+  return (assignment.submissions || []).some(
+    (s) => matchesStudent(s.student, currentUser) && s.status === "approved"
+  );
+}
+
+function isLessonCompletedForStudent(lesson, currentUser) {
+  const modules = lesson?.modules || [];
+  if (modules.length === 0) return false;
+
+  return modules.every((mod) =>
+    (mod.assignment?.submissions || []).some(
+      (s) => 
+        matchesStudent(s.student, currentUser) &&
+        s.status === "approved"
     )
   );
 }
@@ -79,48 +110,18 @@ function isLessonCompletedForStudent(lesson, studentUsername) {
   APP
 ===================== */
 export default function App() {
-  const [users, setUsers] = useState(() => {
-    let stored = [];
-    try {
-      stored = JSON.parse(localStorage.getItem(LS_USERS) || "[]");
-    } catch {
-      stored = [];
-    }
+  const [users, setUsers] = useState(() => auth.initializeUsers());
 
-    if (!Array.isArray(stored)) stored = [];
+  const [currentUser, setCurrentUser] = useState(() => storage.loadCurrentUser());
+    
 
-    if (stored.length === 0) {
-      stored = [
-        {
-          username: OWNER_ACCOUNT,
-          password: "OwnerOperator2026",
-          role: "admin",
-        },
-      ];
-      localStorage.setItem(LS_USERS, JSON.stringify(stored));
-    }
-
-    return stored;
+  const [courses, setCourses] = useState(() => 
+    normalizeCourses(storage.loadCourses())
+  );
+  const [theme, setTheme] = useState(() => {
+    return localStorage.getItem("pf-theme") || "dark";
   });
-
-  const [currentUser, setCurrentUser] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(LS_CURRENT) || "null");
-    } catch {
-      return null;
-    }
-  });
-
-  const [courses, setCourses] = useState(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(LS_COURSES) || "[]");
-      return normalizeCourses(Array.isArray(stored) ? stored : []);
-    } catch {
-      return [];
-    }
-  });
-
-  const [view, setView] = useState("signin"); // signin | dashboard | courses | courseDetail | lesson | progress | submissions | users | messages | reports | settings
+  const [view, setView] = useState("signin"); // signin | dashboard | courses | courseDetail | lesson | progress | studentProgress | submissions | users | messages | reports | settings
   const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [editingCourseId, setEditingCourseId] = useState(null);
   const [previewMode, setPreviewMode] = useState(false);
@@ -150,15 +151,15 @@ export default function App() {
   }, [selectedCourse, activeLessonId]);
 
   useEffect(() => {
-    localStorage.setItem(LS_COURSES, JSON.stringify(courses));
+    storage.saveCourses(courses);
   }, [courses]);
 
   useEffect(() => {
     if (currentUser) {
-      localStorage.setItem(LS_CURRENT, JSON.stringify(currentUser));
+      storage.saveCurrentUser(currentUser);
       setView("dashboard");
     } else {
-      localStorage.removeItem(LS_CURRENT);
+      storage.clearCurrentUser();
       setView("signin");
     }
   }, [currentUser]);
@@ -175,17 +176,29 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [courses]);
 
+  useEffect(() => {
+    document.body.classList.remove("dark", "light");
+    document.body.classList.add(theme);
+    localStorage.setItem("pf-theme", theme);
+  }, [theme]);
+
   /* =====================
     AUTH
   ===================== */
-  function signIn(username, password) {
-    const user = users.find((u) => u.username === username && u.password === password);
-    if (!user) return alert("Invalid username or password");
-    setCurrentUser(user);
+  function signIn(email, password) {
+    try {
+      const user = auth.signInUser(users, email, password);
+      setCurrentUser(user);
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   function signOut() {
+    storage.clearCurrentUser();
     setCurrentUser(null);
+
+    // reset UI state
     setSelectedCourseId(null);
     setEditingCourseId(null);
     setActiveLessonId(null);
@@ -193,15 +206,62 @@ export default function App() {
     setView("signin");
   }
 
-  function createAccount(username, password, role, ownerKey) {
-    if (ownerKey !== OWNER_KEY) return alert("Invalid Owner Key");
-    if (users.some((u) => u.username === username)) return alert("Username already exists");
+  function createAccount(email, password, role, ownerKey, profile) {
+    // Runtime guards
+    if (!email || typeof email !== "string") {
+      alert("Create Account Error: email is required");
+      return;
+    }
 
-    const updated = [...users, { username, password, role }];
-    setUsers(updated);
-    localStorage.setItem(LS_USERS, JSON.stringify(updated));
-    alert("Account created");
-    setView("signin");
+    if (!password || typeof password !== "string") {
+      alert("Create Account Error: password is required");
+      return;
+    }
+
+    if (!role || typeof role !== "string") {
+      alert("Create Account Error: role is required");
+      return;
+    }
+
+    if (!profile || typeof profile !== "object") {
+      alert("Create Account Error: profile object is missing");
+      return;
+    }
+
+    const { firstName, lastName, studentId } = profile;
+
+    if (!firstName || !lastName) {
+      alert("Create Account Error: first and last name are required");
+      return;
+    }
+
+    if (role === "student" && !studentId) {
+      alert("Create Account Error: studentId is required for students");
+      return;
+    }
+
+    if (role === "admin" && !ownerKey) {
+      alert("Create Account Error: owner key is required for admins");
+      return;
+    }
+    try {
+      const updatedUsers = auth.createUser(
+        users,
+        email,
+        password,
+        role,
+        ownerKey,
+        profile.firstName,
+        profile.lastName,
+        profile.studentId
+      );
+
+      setUsers(updatedUsers);
+      alert("Account created");
+      setView("signin");
+    } catch (err) {
+      alert(err.message);
+    }
   }
 
   if (!currentUser) {
@@ -211,6 +271,8 @@ export default function App() {
         setView={setView}
         onSignIn={signIn}
         onCreate={createAccount}
+        theme={theme}
+        setTheme={setTheme}
       />
     );
   }
@@ -241,112 +303,102 @@ export default function App() {
     UI
   ===================== */
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#0b1220" }}>
+    <div id="layout">
       <Sidebar
         currentUser={currentUser}
         isStudent={isStudent}
         isStaff={isStaff}
         setView={setView}
         signOut={signOut}
+        theme={theme}
+        setTheme={setTheme}
       />
 
-      <main style={{ flex: 1, padding: 24, color: "#e5e7eb" }}>
-        <h1 style={{ marginTop: 0, color: "#f59e0b" }}>{safeViewTitle}</h1>
+      <main id="content">
+        <div className="section-container">
+          <h1 style={{ marginTop: 0, color: "#f59e0b" }}>{safeViewTitle}</h1>
 
-        {view === "dashboard" && (
-          <div>
-            <p>Welcome to Phoenix Fire LMS.</p>
-            {isStaff && <p>You have admin/mentor tools available in the sidebar.</p>}
-            {isStudent && <p>You can view courses, messages, and your progress.</p>}
-          </div>
-        )}
+          {view === "dashboard" && (
+            <div>
+              <p>Welcome to Phoenix Fire LMS.</p>
 
-        {/* COURSES */}
-        {view === "courses" && (
-          <>
-            {courseBeingEdited ? (
-              <CourseEditor
-                course={courseBeingEdited}
-                onSave={(updatedCourse) => {
-                  setCourses((prev) =>
-                    prev.map((c) => (c.id === updatedCourse.id ? updatedCourse : c))
-                  );
-                  setEditingCourseId(null);
-                  setView("courseDetail");
-                  setSelectedCourseId(updatedCourse.id);
-                }}
-                onCancel={() => setEditingCourseId(null)}
-              />
-            ) : (
-              <CourseList
-                courses={courses}
-                currentUser={currentUser}
-                isStudent={isStudent}
-                isStaff={isStaff}
-                onCreateCourse={handleCreateCourse}
-                onOpenCourse={(course) => {
-                  setSelectedCourseId(course.id);
-                  setPreviewMode(false);
-                  setActiveLessonId(null);
-                  setView("courseDetail");
-                }}
-                onEditCourse={(course) => {
-                  setEditingCourseId(course.id);
-                  setView("courses");
-                }}
-                onDeleteCourse={(course) => {
-                  const ok = window.confirm("Delete this course?");
-                  if (!ok) return;
+              {currentUser?.role === "admin" && (
+                <p>You have full administrative access.</p>
+              )}
 
-                  setCourses((prev) => prev.filter((c) => c.id !== course.id));
+              {currentUser?.role === "mentor" && (
+                <p>You have mentor tools for reviewing submissions, reports, and progress.</p>
+              )}
+              
+              {currentUser?.role === "student" && (
+                <p>You can view courses, submit assignment, and track your progress.</p>
+              )}
+            </div>
+          )}
 
-                  if (selectedCourseId === course.id) {
-                    setSelectedCourseId(null);
+          {/* COURSES */}
+          {view === "courses" && (
+            <>
+              {courseBeingEdited ? (
+                <CourseEditor
+                  course={courseBeingEdited}
+                  onSave={(updatedCourse) => {
+                    setCourses((prev) =>
+                      prev.map((c) => (c.id === updatedCourse.id ? updatedCourse : c))
+                    );
+                    setEditingCourseId(null);
+                    setView("courseDetail");
+                    setSelectedCourseId(updatedCourse.id);
+                  }}
+                  onCancel={() => setEditingCourseId(null)}
+                />
+              ) : (
+                <CourseList
+                  courses={courses}
+                  currentUser={currentUser}
+                  isStudent={isStudent}
+                  isStaff={isStaff}
+                  onCreateCourse={handleCreateCourse}
+                  onOpenCourse={(course) => {
+                    setSelectedCourseId(course.id);
+                    setPreviewMode(false);
+                    setActiveLessonId(null);
+                    setView("courseDetail");
+                  }}
+                  onEditCourse={(course) => {
+                    setEditingCourseId(course.id);
                     setView("courses");
-                  }
-                }}
-              />
-            )}
-          </>
-        )}
+                  }}
+                  onDeleteCourse={(course) => {
+                    const ok = window.confirm("Delete this course?");
+                    if (!ok) return;
 
-        {/* COURSE DETAIL */}
-        {view === "courseDetail" && selectedCourse && (
-          <div>
-            <button
-              onClick={() => {
-                setSelectedCourseId(null);
-                setPreviewMode(false);
-                setActiveLessonId(null);
-                setView("courses");
-              }}
-              style={{
-                marginBottom: 12,
-                background: "#334155",
-                color: "#e5e7eb",
-                border: "none",
-                padding: "8px 12px",
-                borderRadius: 10,
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              Back to Courses
-            </button>
+                    setCourses((prev) => prev.filter((c) => c.id !== course.id));
 
-            <h2 style={{ marginTop: 0, color: "#f472b6" }}>{selectedCourse.title}</h2>
-            <p style={{ color: "#cbd5e1" }}>{selectedCourse.description}</p>
+                    if (selectedCourseId === course.id) {
+                      setSelectedCourseId(null);
+                      setView("courses");
+                    }
+                  }}
+                />
+              )}
+            </>
+          )}
 
-            {isStaff && (
+          {/* COURSE DETAIL */}
+          {view === "courseDetail" && selectedCourse && (
+            <div>
               <button
                 onClick={() => {
-                  setEditingCourseId(selectedCourse.id);
+                  setSelectedCourseId(null);
+                  setPreviewMode(false);
+                  setActiveLessonId(null);
                   setView("courses");
                 }}
                 style={{
                   marginBottom: 12,
-                  background: "#a855f7",
-                  color: "#0b1220",
+                  background: "#334155",
+                  color: "#e5e7eb",
                   border: "none",
                   padding: "8px 12px",
                   borderRadius: 10,
@@ -354,80 +406,65 @@ export default function App() {
                   cursor: "pointer",
                 }}
               >
-                Update Course Content
+                Back to courses
               </button>
-            )}
 
-            {isStaff && (
-              <button
-                onClick={() => setPreviewMode((p) => !p)}
-                style={{
-                  marginBottom: 12,
-                  marginLeft: 8,
-                  background: "#60a5fa",
-                  color: "#0b1220",
-                  border: "none",
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  fontWeight: 900,
-                  cursor: "pointer",
-                }}
-              >
-                {previewMode ? "Exit Preview" : "Preview as Student"}
-              </button>
-            )}
+              <h2 style={{ marginTop: 0, color: "#f472b6" }}>
+                {selectedCourse.title}
+              </h2>
 
-             {previewMode && isStaff && (
-              <div>
-                <h3 style={{ color: "#f97316" }}>Student Preview</h3>
+              <p style={{ color: "#cbd5e1" }}>
+                {selectedCourse.description}
+              </p>
 
-                {(selectedCourse.lessons || []).length === 0 && <p>No lessons yet.</p>}
+              {isStaff && (
+                <button
+                  onClick={() => {
+                    setEditingCourseId(selectedCourse.id);
+                    setView("courses");
+                  }}
+                  style={{
+                    marginBottom: 12,
+                    background: "#a855f7",
+                    color: "#0b1220",
+                    border: "none",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  Update Course content
+                </button>
+              )}
 
-                {(selectedCourse.lessons || []).map((lesson) => (
-                  <div key={lesson.id} style={{ marginBottom: 14 }}>
-                    <h4 style={{ color: "#60a5fa" }}>{lesson.title}</h4>
+              {isStaff && (
+                <button
+                  onClick={() => setPreviewMode((p) => !p)}
+                  style={{
+                    marginBottom: 12,
+                    marginLeft: 8,
+                    background: "#60a5fa",
+                    color: "#0b1220",
+                    border: "none",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    fontWeight: 900,
+                    cursor: "pointer",
+                  }}
+                >
+                  {previewMode ? "Exit Preview" : "Preview as Student"}
+                </button>
+              )}
 
-                    {(lesson.modules || []).length === 0 && <p>No modules yet.</p>}
+              {!previewMode && (
+                <div>
+                  <h3 style={{ color: "#60a5fa" }}>Lessons</h3>
 
-                    {(lesson.modules || []).map((mod) => (
-                      <div
-                        key={mod.id}
-                        style={{
-                          border: "1px solid #334155",
-                          padding: 12,
-                          marginBottom: 10,
-                          borderRadius: 14,
-                          background: "#111827",
-                        }}
-                      >
-                        <strong style={{ color: "#f59e0b" }}>{mod.title}</strong>
-                        <MarkdownPreview markdown={mod.content || ""} />
-
-                        {mod.assignment?.instructionsText && (
-                          <div style={{ marginTop: 10 }}>
-                            <div style={{ fontWeight: 900, color: "#f97316" }}>
-                              Assignment
-                            </div>
-                            <MarkdownPreview markdown={mod.assignment.instructionsText} />
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {!previewMode && (
-              <div>
-                <h3 style={{ color: "#60a5fa" }}>Lessons</h3>
-
-                {(selectedCourse.lessons || []).length === 0 && <p>No lessons yet.</p>}
-
-                {(selectedCourse.lessons || []).map((lesson) => {
-                  const completedBadge = isStudent
-                    ? isLessonCompletedForStudent(lesson, currentUser.username)
-                    : false;
+                  {(selectedCourse.lessons || []).map((lesson) => {
+                    const completed = isStudent
+                      ? isLessonCompletedForStudent(lesson, currentUser)
+                      : false;
 
                   return (
                     <div key={lesson.id} style={{ marginBottom: 8 }}>
@@ -446,111 +483,143 @@ export default function App() {
                           cursor: "pointer",
                         }}
                       >
-                        {lesson.title} {completedBadge ? "🏅" : ""}
+                        {lesson.title} {completed ? "🏅" : ""}
                       </button>
                     </div>
                   );
-                })}
-              </div>
-            )}
-          </div>
-        )}
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* LESSON */}
+          {view === "lesson" && activeLesson && selectedCourse && (
+            <div>
+              <button
+                onClick={() => {
+                  setActiveLessonId(null);
+                  setView("courseDetail");
+                }}
+                style={{
+                  marginBottom: 12,
+                  background: "#334155",
+                  color: "#e5e7eb",
+                  border: "none",
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                Back to Course
+              </button>
 
-        {/* LESSON */}
-        {view === "lesson" && activeLesson && selectedCourse && (
-          <div>
-            <button
-              onClick={() => {
-                setActiveLessonId(null);
-                setView("courseDetail");
-              }}
-              style={{
-                marginBottom: 12,
-                background: "#334155",
-                color: "#e5e7eb",
-                border: "none",
-                padding: "8px 12px",
-                borderRadius: 10,
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              Back to Course
-            </button>
+              <LessonView
+                lesson={activeLesson}
+                selectedCourseId={selectedCourseId}
+                currentUser={currentUser}
+                isStudent={isStudent}
+                isStaff={isStaff}
+                previewMode={previewMode}
+                setCourses={setCourses}
+                canAccessModuleByPrereq={canAccessModuleByPrereq}
+                newId={newId}
+              />
+            </div>
+          )}
 
-            <LessonView
-              lesson={activeLesson}
-              selectedCourseId={selectedCourseId}
-              currentUser={currentUser}
-              isStudent={isStudent}
-              isStaff={isStaff}
+          {view === "submissions" && isStaff && (
+            <SubmissionsDashboard
+              courses={courses}
               setCourses={setCourses}
-              canAccessModuleByPrereq={canAccessModuleByPrereq}
-              newId={newId}
             />
-          </div>
-        )}
+          )}
 
-         {/* PROGRESS */}
-        {view === "progress" && (
-          <div>
-            {isStudent && (
-              <>
-                <h2 style={{ marginTop: 0, color: "#f472b6" }}>My Progress</h2>
-                {courses.length === 0 && <p>No courses yet.</p>}
+          {/* PROGRESS */}
+          {view === "progress" && (
+            <div>
+              {isStudent && (
+                <>
+                  <h2 style={{ marginTop: 0, color: "#f472b6" }}>
+                    My Progress
+                  </h2>
 
-                {courses.map((course) => {
-                  const percent = calculateCourseProgress(course, currentUser.username);
-                  return (
-                    <div
-                      key={course.id}
-                      style={{
-                        border: "1px solid #334155",
-                        padding: 12,
-                        marginBottom: 12,
-                        borderRadius: 14,
-                        background: "#111827",
-                      }}
-                    >
-                      <h3 style={{ marginTop: 0, color: "#60a5fa" }}>{course.title}</h3>
+                  {courses.length === 0 && <p>No courses yet.</p>}
 
+                  {courses.map((course) => {
+                    const studentKey = 
+                      currentUser.studentId ??
+                      currentUser.email ??
+                      currentUser.username;
+
+                    const percent = calculateCourseProgress(course, studentKey);
+                    return (
                       <div
+                        key={course.id}
                         style={{
-                          background: "#334155",
-                          borderRadius: 999,
-                          overflow: "hidden",
-                          height: 14,
-                          marginBottom: 6,
+                          border: "1px solid #334155",
+                          padding: 12,
+                          marginBottom: 12,
+                          borderRadius: 14,
+                          background: "#111827",
                         }}
                       >
+                        <h3 style={{ marginTop: 0, color: "#60a5fa" }}>
+                          {course.title}
+                        </h3>
+
                         <div
                           style={{
-                            width: `${percent}%`,
-                            background: "#22c55e",
-                            height: "100%",
+                            background: "#334155",
+                            borderRadius: 999,
+                            overflow: "hidden",
+                            height: 14,
+                            marginBottom: 6,
                           }}
-                        />
+                        >
+                          <div
+                            style={{
+                              width: `${percent}%`,
+                              background: "#22c55e",
+                              height: "100%",
+                            }}
+                          />
+                        </div>
+
+                        <strong>
+                          {percent}% complete {percent === 100 ? "🏅" : ""}
+                        </strong>
                       </div>
+                    );
+                  })}
+                </>
+              )}
 
-                      <strong>
-                        {percent}% complete {percent === 100 ? "🏅" : ""}
-                      </strong>
-                    </div>
-                  );
-                })}
-              </>
-            )}
+              {isStaff && (
+                <>
+                  <h2 style={{ marginTop: 0, color: "#f472b6" }}>Student Progress</h2>
+                  <p style={{ color: "#cbd5e1" }}>
+                    Progress is based on approved assignments (module unlocks).
+                  </p>
 
-            {isStaff && (
-              <>
-                <h2 style={{ marginTop: 0, color: "#f472b6" }}>Student Progress</h2>
-                <p style={{ color: "#cbd5e1" }}>
-                  Progress is based on approved assignments (module unlocks).
-                </p>
-              </>
-            )}
-          </div>
-        )}
+                  <StudentProgressBoard
+                    courses={courses}
+                    users={users}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
+          {/* STAFF PROGRESS BOARD (Mentor/Admin) */}
+          {view === "studentProgress" && isStaff && (
+            <StudentProgressBoard
+              courses={courses}
+              users={users}
+            />
+          )}
+        </div>
       </main>
     </div>
   );
@@ -559,88 +628,153 @@ export default function App() {
 /* =====================
   AUTH SCREEN
 ===================== */
-function AuthScreen({ view, setView, onSignIn, onCreate }) {
-  const [username, setUsername] = useState("");
+function AuthScreen({ view, setView, onSignIn, onCreate, theme, setTheme }) {
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [studentId, setStudentId] = useState("");
   const [role, setRole] = useState("student");
   const [ownerKey, setOwnerKey] = useState("");
 
   return (
-    <div style={{ padding: 40, maxWidth: 520, color: "#e5e7eb" }}>
-      <h1 style={{ color: "#f59e0b" }}>Phoenix Fire Technical Academy</h1>
+    <div id="auth-container">
+      <div id="auth-card">
+        <button
+          className="theme-toggle"
+          onClick={() => 
+            setTheme(theme === "dark" ? "light" : "dark")
+          }
+        >
+          {theme === "dark" ? "☀️" : "🌙"}
+        </button>
 
-      {view === "signin" && (
-        <>
-          <h3 style={{ color: "#f472b6" }}>Sign In</h3>
+        <img
+          src="/src/assets/Images/phoenix.jpg"
+          alt="Phoenix Fire Technical Academy"
+          className="auth-logo"
+        />
+        <h1 className="app-title">Phoenix Fire Technical Academy</h1>
 
-          <input
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }}
-          />
+        {view === "signin" && (
+          <>
+            <h2>Sign In</h2>
 
-           <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }}
-          />
+            <input
+              className="input-wide"
+              placeholder="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
 
-          <button onClick={() => onSignIn(username, password)}>Sign In</button>
+            <input
+              className="input-wide"
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
 
-          <p style={{ marginTop: 12 }}>
-            <button onClick={() => setView("create")}>Create Account</button>
-          </p>
-        </>
-      )}
+            <button className="btn" onClick={() => onSignIn(email, password)}>
+              Sign In
+            </button>
 
-      {view === "create" && (
-        <>
-          <h3 style={{ color: "#f472b6" }}>Create Account</h3>
+            <button
+              className="btn-secondary"
+              onClick={() => alert("Password recovery coming soon")}
+            >
+              Forgot Password?
+            </button>
 
-          <input
-            placeholder="Username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }}
-          />
+            <button className="btn-secondary" onClick={() => setView("create")}>
+              Create Account
+            </button>
+          </>
+        )}
 
-          <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }}
-          />
+        {view === "create" && (
+          <>
+            <h2>Create Account</h2>
 
-           <select
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }}
-          >
-            <option value="student">Student</option>
-            <option value="mentor">Mentor</option>
-            <option value="admin">Admin</option>
-          </select>
+            <input
+              className="input-wide"
+              placeholder="First Name"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+            />
 
-          <input
-            placeholder="Owner Key"
-            value={ownerKey}
-            onChange={(e) => setOwnerKey(e.target.value)}
-            style={{ width: "100%", marginBottom: 8, padding: 10, borderRadius: 10 }}
-          />
+            <input
+              className="input-wide"
+              placeholder="Last Name"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+            />
 
-          <button onClick={() => onCreate(username, password, role, ownerKey)}>
-            Create Account
-          </button>
+            <input
+              className="input-wide"
+              placeholder="Student ID"
+              value={studentId}
+              onChange={(e) => setStudentId(e.target.value)}
+            />
 
-          <p style={{ marginTop: 12 }}>
-            <button onClick={() => setView("signin")}>Back</button>
-          </p>
-        </>
-      )}
+            <input
+              className="input-wide"
+              placeholder="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+
+            <input
+              className="input-wide"
+              type="password"
+              placeholder="Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            <select
+              className="input-wide"
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+            >
+              <option value="student">Student</option>
+              <option value="mentor">Mentor</option>
+              <option value="admin">Admin</option>
+            </select>
+
+            <input
+              className="input-wide"
+              placeholder="Owner Key"
+              value={ownerKey}
+              onChange={(e) => setOwnerKey(e.target.value)}
+            />
+
+            <button
+              className="btn"
+              onClick={() =>
+                onCreate(
+                  email,
+                  password,
+                  role,
+                  ownerKey,
+                  {
+                    firstName,
+                    lastName,
+                    studentId,
+                  })
+              }
+            >
+              Create Account
+            </button>
+
+            <button className="btn-secondary" onClick={() => setView("signin")}>
+              Back
+            </button>
+          </>
+        )}
+      </div>
     </div>
   );
 }

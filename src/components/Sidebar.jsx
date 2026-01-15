@@ -1,3 +1,4 @@
+import phoenixLogo from "../assets/Images/phoenix.jpg";
 export default function Sidebar({
     currentUser,
     isStudent,
@@ -6,52 +7,83 @@ export default function Sidebar({
     signOut,
 }) {
     return (
-        <aside
-            style={{
-                width: "260px",
-                padding: "16px",
-                background: "#111827",
-                color: "#fff",
-                display: "flex",
-                flexDirection: "column",
-                gap: "10px",
-            }}
-        >
-            <h2>Phoenix LMS</h2>
+        <aside id="sidebar">
+            {/* HEADER */}
+            <div className="sidebar-header">
+                <img
+                    src={phoenixLogo}
+                    alt="Phoenix Fire Technical Academy"
+                    className="sidebar-logo-img"
+                />
+                <div className="sidebar-logo-text">
+                    Phoenix Fire<br />Technical Academy
+                </div>
+            </div>
 
-            <p style={{ fontSize: 14 }}>
-                {currentUser.username}
-                <br />
-                <strong>{currentUser.role}</strong>
-            </p>
+            {/* USER INFO */}
+            <div className="sidebar-user">
+                <div className="sidebar-username">{currentUser.email ?? currentUser.username}</div>
+                <div className="sidebar-role">{currentUser.role}</div>
+            </div>
 
-            {/* Shared */}
-            <button onClick={() => setView("dashboard")}>Dashboard</button>
-            <button onClick={() => setView("courses")}>Courses</button>
-            <button onClick={() => setView("messages")}>Messages</button>
+            {/* SHARED */}
+            <button className="sidebar-btn" onClick={() => setView("dashboard")}>
+                Dashboard
+            </button>
+            <button className="sidebar-btn" onClick={() => setView("courses")}>
+                Courses
+            </button>
+            <button className="sidebar-btn" onClick={() => setView("messages")}>
+                Messages
+            </button>
 
-            {/* Student-only */}
+            {/* STUDENT */}
             {isStudent && (
                 <>
-                    <button onClick={() => setView("progress")}>My Progress</button>
-                    <button onClick={() => setView("settings")}>Settings</button>
+                    <button className="sidebar-btn" onClick={() => setView("progress")}>
+                        My Progress
+                    </button>
+                    <button className="sidebar-btn" onClick={() => setView("settings")}>
+                        Settings
+                    </button>
                 </>
             )}
 
-            {/* Admin / Mentor */}
+            {/* STAFF */}
             {isStaff && (
                 <>
-                    <button onClick={() => setView("users")}>Users</button>
-                    <button onClick={() => setView("progress")}>Progress</button>
-                    <button onClick={() => setView("reports")}>Reports</button>
-                    <button onClick={() => setView("submissions")}>Submissions</button>
-                    <button onClick={() => setView("settings")}>Settings</button>
+                <button className="sidebar-btn" onClick={() => setView("progress")}>
+                    Progress
+                </button>
+                <button className="sidebar-btn" onClick={() => setView("reports")}>
+                    Reports
+                </button>
+                <button className="sidebar-btn" onClick={() => setView("submissions")}>
+                    Submissions
+                </button> 
+                <button className="sidebar-btn" onClick={() => setView("studentProgress")}>
+                    Student Progress
+                </button>
+                <button className="sidebar-btn" onClick={() => setView("settings")}>
+                    Settings
+                </button>
                 </>
             )}
 
-            <button onClick={signOut} style={{ marginTop: "auto" }}>
+            {/* ADMIN ONLY */}
+            {currentUser?.role === "admin" && (
+                <>
+                    <button className="sidebar-btn" onClick={() => setView("users")}>
+                        Users
+                    </button>
+                </>
+            )}
+
+            {/* LOGOUT */}
+            <button className="sidebar-btn sidebar-logout" onClick={signOut}>
                 Logout
             </button>
+
         </aside>
     );
 }
