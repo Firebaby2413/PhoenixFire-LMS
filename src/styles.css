@@ -457,3 +457,29 @@ body.light .module-box {
   color: var(--magic-blue);
   text-decoration: underline;
 }
+
+
+.active-msg {
+  border: 1px solid var(--pf-fire) !important;
+  background: rgba(245, 158, 11, 0.1) !important;
+  box-shadow: 0 0 10px rgba(245, 258, 22, 0.2);
+}
+
+.feedback-box {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 15px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+}
+
+/* Scrollbar for Dark mode */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--pf-bg);
+}
+::-webit-scrollbar-thumb {
+  background: var(--pr-border);
+  border-radius: 10px;
+}

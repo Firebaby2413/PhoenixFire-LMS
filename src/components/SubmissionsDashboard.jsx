@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
+import { canMentorSeeCourse } from "../utils/permissions";
 import "../styles.css";
 
-export default function SubmissionsDashboard({ courses, setCourses }) {
+export default function SubmissionsDashboard({ courses, setCourses, currentUser }) {
     //Filters (inbox defaults)
     const [statusFilter, setStatusFilter] = useState("pending"); // pending | approved | revision | all
     const [courseFilterId, setCourseFilterId] = useState("all");
@@ -12,6 +13,9 @@ export default function SubmissionsDashboard({ courses, setCourses }) {
         const list = [];
 
         for (const course of courses || []) {
+            // Mentor routing filter
+            if (!canMentorSeeCourse(course, currentUser)) continue;
+
             for (const lesson of course.lessons || []) {
                 for (const mod of lesson.modules || []) {
                     const assignment = mod.assignment;
@@ -33,7 +37,7 @@ export default function SubmissionsDashboard({ courses, setCourses }) {
         // Sort newest first (pending work feels like an inbox)
         list.sort((a, b) => (b.submission.submittedAt || 0) - (a.submission.submittedAt || 0));
         return list;
-    }, [courses]);
+    }, [courses, currentUser]);
 
     // 2) Apply filters
     const filteredItems = useMemo(() => {
@@ -223,6 +227,22 @@ export default function SubmissionsDashboard({ courses, setCourses }) {
                                         );
                                     }}
                                 />
+                                <div style={{ marginTop: 10 }}>
+                                    <input
+                                        className="input-wide"
+                                        placeholder="Youtube Feedback Link"
+                                        value={submission.feedbackVideoUrl || ""}
+                                        onChange={(e) => {
+                                            updateSubmission(
+                                                course.id,
+                                                lesson.id,
+                                                module.id,
+                                                submission.id,
+                                                { feedbackVideoUrl: e.target.value }
+                                            );
+                                        }}
+                                    />
+                                </div>
                             </div>
 
                             {/* ACTIONS */}

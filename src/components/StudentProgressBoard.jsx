@@ -1,21 +1,38 @@
-import { calculateCourseProgress } from "../utils/progress";
+import { useMemo, useState } from "react";
+import { calculateCourseProgress, calculateCourseProgressDetailed, isModuleApprovedByStudent, isModuleCompletedByStudent } from "../utils/progress";
 import "../styles.css";
 
+function getStudentKey(user) {
+  return user?.studentId ?? user?.email ?? user?.username ?? null;
+}
+
 export default function StudentProgressBoard({ courses, users }) {
-  const studentUsers = Array.isArray(users)
-    ? users.filter((u) => u?.role === "student")
-    : [];
+  const [openMap, setOpenMap] = useState({}); // { [courseId|studentKey]: true/false }
+
+  const studentUsers = useMemo(() => {
+    return Array.isArray(users) ? users.filter((u) => u?.role === "student") : [];
+  }, [users]);
 
   if (!courses || courses.length === 0) {
-    return <p>No courses yet.</p>;
+    return <p>No courses yet.</p>
   }
 
   if (studentUsers.length === 0) {
-    return <p>No students found.</p>;
+    return <p>No students found.</p>
+  }
+
+  function toggleDetails(courseId, studentKey) {
+    const k = `${courseId}_${studentKey || "missing"}`;
+    setOpenMap((prev) => ({ ...prev, [k]: !prev[k] }));
+  }
+
+  function isOpen(courseId, studentKey) {
+    const k = `${courseId}_${studentKey || "missing"}`;
+    return !!openMap[k];
   }
 
   return (
-    <div>
+    <div className="section-container">
       <h2 className="pf-title">Student Progress (Mentor/Admin)</h2>
 
       {courses.map((course) => (
@@ -27,12 +44,22 @@ export default function StudentProgressBoard({ courses, users }) {
 
           <div style={{ display: "grid", gap: 10 }}>
             {studentUsers.map((student) => {
-              const studentKey =
-                student?.studentId ?? student?.email ?? student?.username;
+              const studentKey = getStudentKey(student);
 
-              const percent = studentKey
-                ? calculateCourseProgress(course, studentKey)
-                : 0;
+              const detailed = studentKey
+                ? calculateCourseProgressDetailed(course, studentKey)
+                : {
+                  totalLessons: 0,
+                  completedLessons: 0,
+                  totalModules: 0,
+                  completedModules: 0,
+                  percent: 0,
+                };
+              
+              const percent =
+                studentKey ? calculateCourseProgress(course, studentKey) : 0;
+              
+              const showDetails = isOpen(course.id, studentKey);
 
               return (
                 <div
@@ -44,17 +71,37 @@ export default function StudentProgressBoard({ courses, users }) {
                     padding: 12,
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <strong>
-                      {student.firstName} {student.lastName}
-                    </strong>
-                    <span style={{ opacity: 0.85 }}>{percent}%</span>
+                  {/* HEADER ROW */}
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      alignItems: "center",
+                    }}
+                  >
+                    <div>
+                      <strong>
+                        {student.firstName} {student.lastName}
+                      </strong>
+                      <div style={{ opacity: 0.85, fontSize: 12, marginTop: 2 }}>
+                        {studentKey || "(missing student key)"}
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontWeight: 900 }}>
+                        {percent}% {percent === 100 ? "🏅" : ""}
+                      </div>
+                      <div style={{ opacity: 0.85, fontSize: 12 }}>
+                        Modules: {detailed.completedModules}/{detailed.totalModules} •
+                        Lessons: {detailed.completedLessons}/{detailed.totalLessons}
+                      </div>
+                    </div>
                   </div>
 
-                  <div
-                    className="course-progress-bar"
-                    style={{ marginTop: 8 }}
-                  >
+                  {/* PROGRESS BAR */}
+                  <div className="course-progress-bar" style={{ marginTop: 10 }}>
                     <div
                       className="course-progress-fill"
                       style={{
@@ -62,15 +109,116 @@ export default function StudentProgressBoard({ courses, users }) {
                         background:
                           percent === 100
                             ? "var(--magic-blue)"
-                            : "var(--sky-blue)",
+                            : "var(--sky-blue)"
                       }}
                     />
                   </div>
 
-                  <small style={{ opacity: 0.85 }}>
-                    {studentKey || "(missing student key)"}
-                    {percent === 100 ? " 🏅" : ""}
-                  </small>
+                  {/* ACTIONS */}
+                  <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+                    <button
+                      className="btn-secondary btn-inline"
+                      type="button"
+                      onClick={() => toggleDetails(course.id, studentKey)}
+                      disabled={!studentKey}
+                      title={!studentKey ? "Student key missing" : ""}
+                    >
+                      {showDetails ? "Hide Details" : "Show Details"}
+                    </button>
+                  </div>
+                  {/* DETAILS (optional) */}
+                  {showDetails && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        borderTop: "1px solid var(--slate-700)",
+                        paddingTop: 12,
+                        display: "grid",
+                        gap: 10,
+                      }}
+                    >
+                      {(course.lessons || []).length === 0 ? (
+                        <p style={{ margin: 0, opacity: 0.9 }}>No lessons yet.</p>
+                      ) : (
+                        (course.lessons || []).map((lesson) => {
+                          const mods = Array.isArray(lesson.modules) ? lesson.modules : [];
+                          const total = mods.length;
+
+                          let completed = 0;
+
+                          for (const m of mods) {
+                            const requiresSubmission = !!m?.assignment?.repoUrl;
+
+                            const done = requiresSubmission
+                              ? isModuleApprovedByStudent(m, student)
+                              : isModuleCompletedByStudent(m, student);
+                            
+                            if (done) completed++;
+                          }
+
+                          const lessonComplete = total > 0 && completed === total;
+
+                          return (
+                            <div
+                              key={lesson.id}
+                              style={{
+                                border: "1px solid var(--slate-700)",
+                                borderRadius: 12,
+                                padding: 10,
+                                background: "rgba(0,0,0,0.10)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  gap: 10,
+                                  alignItems: "center",
+                                }}
+                              >
+                                <div style={{ fontWeight: 900 }}>
+                                  {lesson.title}
+                                  {lessonComplete ? "🏅" : total === 0 ? "-" : ""}
+                                </div>
+
+                                <div style={{ opacity: 0.9 }}>
+                                  {total === 0 ? (
+                                    <span style={{ fontSize: 12 }}>
+                                      No assignments.
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: 12 }}>
+                                      {completed}/{total} complete
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Mini bar per lesson */}
+                              {total > 0 && (
+                                <div
+                                  className="course-progress-bar"
+                                  style={{ marginTop: 8, height: 10 }}
+                                >
+                                  <div
+                                    className="course-progress-fill"
+                                    style={{
+                                      width: `${Math.round((completed / total) * 100)}%`,
+                                      background:
+                                        completed === total
+                                          ? "var(--magic-blue)"
+                                          : "var(--sky-blue)",
+                                      height: "100%",
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}

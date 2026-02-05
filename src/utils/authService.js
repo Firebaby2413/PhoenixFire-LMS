@@ -36,16 +36,29 @@ export function initializeUsers() {
 export function signInUser(users, email, password) {
     const safeUsers = Array.isArray(users) ? users : [];
 
-    console.log("SIGN IN USERS:", users, "safeUsers", safeUsers, Array.isArray(users));
+    const userIndex = safeUsers.findIndex((u) => u.email === email && u.password === password);
 
-    const user = safeUsers.find((u) => u.email === email && u.password === password);
-
-    if (!user) {
+    if (userIndex === -1) {
         throw new Error("Invalid email or password");
     }
 
-    storage.saveCurrentUser(user);
-    return user;
+    // Capture the current timestamp
+    const now = new Date().toISOString();
+
+    // Update the specific user in the array
+    const updatedUser = {
+        ...safeUsers[userIndex],
+        lastLogin: now
+    };
+
+    const updatedUsers = [...safeUsers];
+    updatedUsers[userIndex] = updatedUser;
+
+    //save the full list back to storage so the timestamp persists
+    storage.saveUsers(updatedUsers);
+    storage.saveCurrentUser(updatedUser);
+
+    return updatedUser;
 }
 
 export function createUser(users, email, password, role, ownerKey, firstName, lastName, studentId) {

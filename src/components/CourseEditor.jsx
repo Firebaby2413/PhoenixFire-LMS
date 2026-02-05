@@ -1,11 +1,15 @@
 import { useEffect, useState } from "react";
 import MarkdownPreview from "./MarkdownPreview";
-import "../App.css";
+import "../styles.css";
 
 
 function newId() {
   if (typeof crypto !== "undefined" && crypto?.randomUUID) return crypto.randomUUID();
   return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+}
+
+function getUserKey(user) {
+  return user?.studentId ?? user?.email ?? user?.username ?? null;
 }
 
 function ensureModuleHasAssignment(mod) {
@@ -16,12 +20,18 @@ function ensureModuleHasAssignment(mod) {
 
   const fromArray = Array.isArray(mod?.assignments) ? mod.assignments[0] : null;
   const fromSubmissions = Array.isArray(mod?.submissions) ? mod.submissions : [];
+  const legacyVideo =
+    fromArray?.instructionsVideoUrl ??
+    fromArray?.instructionVideoUrl ?? // legacy typo support
+    mod?.assignment?.instructionVideoUrl ??
+    "";
 
   return {
     ...mod,
     assignment: {
+      repoUrl: fromArray?.repoUrl ?? mod?.repoUrl ?? "",
       instructionsText: fromArray?.instructions ?? "",
-      instructionsVideoUrl: fromArray?.instructionsVideoUrl ?? "",
+      instructionsVideoUrl: fromArray?.instructionsVideoUrl ?? legacyVideo ?? "",
       submissions: Array.isArray(fromArray?.submissions)
         ? fromArray.submissions
         : fromSubmissions,
@@ -38,7 +48,8 @@ function deepCloneCourseLessons(course) {
   }));
 }
 
-export default function CourseEditor({ course, onSave, onCancel }) {
+export default function CourseEditor({ course, users, currentUser, onSave, onCancel }) {
+  const [mentorKey, setMentorKey] = useState(course?.mentorKey ?? "");
   const [title, setTitle] = useState(course?.title ?? "");
   const [description, setDescription] = useState(course?.description ?? "");
   const [lessons, setLessons] = useState(() => deepCloneCourseLessons(course));
@@ -46,6 +57,7 @@ export default function CourseEditor({ course, onSave, onCancel }) {
   // Sync editor when switching to a different course id
   useEffect(() => {
     if (!course) return;
+    setMentorKey(course.mentorKey ?? "");
     setTitle(course.title ?? "");
     setDescription(course.description ?? "");
     setLessons(deepCloneCourseLessons(course));
@@ -128,6 +140,7 @@ export default function CourseEditor({ course, onSave, onCancel }) {
       ...course,
       title,
       description,
+      mentorKey,
       lessons,
     });
   }
@@ -153,7 +166,38 @@ export default function CourseEditor({ course, onSave, onCancel }) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
-        </div>
+      </div>
+      
+      {/* ADMIN: ASSign mentor to this course */}
+      {currentUser?.role === "admin" && (
+        <>
+          <label className="help-text">Assigned Mentor (course owner)</label>
+
+          <select
+            className="input-wide"
+            value={mentorKey}
+            onChange={(e) => setMentorKey(e.target.value)}
+          >
+            <option value="">Unassigned (visible to any mentor)</option>
+            {(Array.isArray(users) ? users : [])
+              .filter((u) => u?.role === "mentor")
+              .map((m) => {
+                const key = getUserKey(m);
+                if (!key) return null;
+                return (
+                  <option key={key} value={key}>
+                    {m.firstName} {m.lastName} - {key}
+                  </option>
+                );
+              })}
+          </select>
+
+          <small className="help-text">
+            Only the assigned mentor (and admins) will see submissions for this course.
+          </small>
+        </>
+      )}
+      
       <h3 style={{ color: "#60a5fa" }}>Lessons</h3>
 
       {lessons.length === 0 && <p>No lessons yet.</p>}
@@ -171,7 +215,7 @@ export default function CourseEditor({ course, onSave, onCancel }) {
             }
           />
 
-           <textarea
+          <textarea
             className="input-wide"
             value={lesson.description || ""}
             onChange={(e) =>
@@ -221,8 +265,23 @@ export default function CourseEditor({ course, onSave, onCancel }) {
                 className="card"
               >
                 <h5 className="assignment-title">
-                  Assignment (Student Work)
+                  Module Requirements
                 </h5>
+
+                {/* MODULE TYPE INFO */}
+                <div style={{ marginBottom: 10 }}>
+                  <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                    Module Type:
+                    <span style={{ marginLeft: 8, opacity: 0.9 }}>
+                      {mod.assignment?.repoUrl ? "Repo Submission (mentor approval required)" : "Content / Complete-only (no repo)"}
+                    </span>
+                  </div>
+
+                  <small className="help-text">
+                    If you add a starter Repo URL below, students will submit a GitHub link and it will require mentor approval.
+                    If you leave it blank, students will see a "Mark Complete" button instead.
+                  </small>
+                </div>
 
                 {/* Starter Repo */}
                 <input
@@ -253,6 +312,37 @@ export default function CourseEditor({ course, onSave, onCancel }) {
                   }}
                   style={{ width: "100%", marginBottom: 8 }}
                 />
+
+                <button
+                  type="button"
+                  className="btn-secondary btn-inline"
+                  style={{ marginBottom: 10 }}
+                  onClick={() => {
+                    setLessons((prev) =>
+                      prev.map((l) =>
+                        l.id === lesson.id
+                          ? {
+                            ...l,
+                            modules: l.modules.map((m) =>
+                              m.id === mod.id
+                                ? {
+                                  ...m,
+                                  assignment: {
+                                    ...(m.assignment || {}),
+                                    repoUrl: "",
+                                  },
+                                }
+                                : m
+                            ),
+                          }
+                          : l
+                      )
+                    );
+                  }}
+                >
+                  Clear Repo Requirement (Content Module)
+                </button>
+
 
                 {/* Instructions (Markdown) */}
                 <textarea
@@ -287,7 +377,7 @@ export default function CourseEditor({ course, onSave, onCancel }) {
                 {/* Optional Video */}
                 <input
                   placeholder="Instruction Video URL (optional)"
-                  value={mod.assignment?.instructionVideoUrl || ""}
+                  value={mod.assignment?.instructionsVideoUrl || ""}
                   onChange={(e) => {
                     const instructionsVideoUrl = e.target.value;
                     setLessons((prev) =>

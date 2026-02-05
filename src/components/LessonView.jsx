@@ -1,6 +1,54 @@
 import MarkdownPreview from "./MarkdownPreview";
 import "../styles.css";
 
+/* HELPER COMPONENT FOR VIDEO FEEDBACK */
+function FeedbackPlayer({ submission }) {
+  // Only render if there is actual feedback data (text or video)
+  if (!submission || (!submission.feedbackText && !submission.feedbackVideoUrl)) return null;
+
+  const getEmbedUrl = (url) => {
+    if (!url) return null;
+    // Standard YouTube regex to find video ID and convert to embed format
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? `https://www.youtube.com/embed/${match[2]}` : null;
+  };
+
+  const embedUrl = getEmbedUrl(submission.feedbackVideoUrl);
+
+  return (
+    <div className="feedback-box" style={{
+      marginTop: "20px",
+      borderLeft: "4px solid var(--pf-fire)",
+      background: "rgba(245, 158, 11, 0.03)",
+      padding: "15px",
+      borderRadius: "8px"
+    }}>
+      <strong style={{ color: "var(--(pf-fire)", display: "block", marginBottom: "8px" }}>
+        📋 Mentor Feedback & Revision Notes
+      </strong>
+
+      {submission.feedbackText && (
+        <p style={{ whiteSpace: "pre-wrap", marginBottom: embedUrl ? "15px" : "0" }}>
+          {submission.feedbackText}
+        </p>
+      )}
+
+      {embedUrl && (
+        <div style={{ position: "relative", paddingBottom: "56.25%", height: 0, overflow: "hidden", borderRadius: "8px", marginTop: "10px" }}>
+          <iframe
+            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 }}
+            src={embedUrl}
+            title="Video Feedback"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function LessonView({
   lesson,
   selectedCourseId,
@@ -44,6 +92,15 @@ export default function LessonView({
           matchesStudent(s.student, currentUser)
         );
 
+        const requiresSubmission = !!assignment?.repoUrl;
+
+        // Content module = no repo required
+        const isContentModule = !requiresSubmission;
+
+        const isCompleted = isContentModule
+          ? (mod.completions || []).some((c) => c?.student === studentKey)
+          : mySubmission?.status === "approved";
+
         const embedVideoUrl = assignment?.instructionsVideoUrl?.includes("watch?v=")
           ? assignment.instructionsVideoUrl.replace("watch?v=", "embed/")
           : assignment?.instructionsVideoUrl;
@@ -51,7 +108,13 @@ export default function LessonView({
         let statusLabel = "Not Submitted";
         let statusColor = "badge-pending";
 
-        if (mySubmission) {
+        //Content module completion
+        if (isContentModule && isCompleted) {
+          statusLabel = "Completed";
+          statusColor = "badge-approved";
+        }
+
+        if (requiresSubmission && mySubmission) {
           if (mySubmission.status === "pending") {
             statusLabel = "Submitted (Pending Review)";
             statusColor = "badge-pending";
@@ -82,6 +145,55 @@ export default function LessonView({
               <p className="locked-text">
                 Complete the previous module’s assignment to unlock.
               </p>
+            )}
+
+            {/* CONTENT-ONLY MODULE COMPLETION */}
+            {isStudent && unlocked && isContentModule && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  className="btn btn-inline"
+                  type="button"
+                  disabled={!studentKey || isCompleted}
+                  onClick={() => {
+                    if (!studentKey) {
+                      alert("Missing student identifier (studentId/email/username).");
+                      return;
+                    }
+
+                    setCourses((prev) =>
+                      (prev || []).map((course) =>
+                        course.id !== selectedCourseId
+                          ? course
+                          : {
+                            ...course,
+                            lessons: (course.lessons || []).map((l) =>
+                              l.id !== lesson.id
+                                ? l
+                                : {
+                                  ...l,
+                                  modules: (l.modules || []).map((m) =>
+                                    m.id !== mod.id
+                                      ? m
+                                      : {
+                                        ...m,
+                                        completions: [
+                                          ...(m.completions || []).filter(
+                                            (c) => c?.student !== studentKey
+                                          ),
+                                          { student: studentKey, completedAt: Date.now() },
+                                        ],
+                                      }
+                                  ),
+                                }
+                            ),
+                          }
+                      )
+                    );
+                  }}
+                >
+                  {isCompleted ? "Completed ✅" : "Mark Complete"}
+                </button>
+              </div>
             )}
 
             {/* ASSIGNMENT (VISIBLE TO STUDENTS + STAFF) */}
@@ -118,16 +230,16 @@ export default function LessonView({
             )}
 
             {/* STUDENT SUBMISSION */}
-            {isStudent && unlocked && assignment && (
+            {isStudent && unlocked && requiresSubmission && assignment && (
               <div className="submission-box">
                 <input
                   className="input-wide"
-                  placeholder="Paste your GitHub repo URL and press Enter"
+                  placeholder={mySubmission?.status === "revision" ? "Paste revision GitHub URL and press Enter" : "Paste your GitHub repo URL and press Enter"}
                   onKeyDown={(e) => {
                     if (e.key !== "Enter") return;
 
                     const url = e.target.value.trim();
-                    if (!url) return;
+                    if (!url || !studentKey) return;
 
                     if (!studentKey) {
                       alert("Missing student identifier (studentId/email/username).");
@@ -139,7 +251,8 @@ export default function LessonView({
                       student: studentKey,
                       url,
                       status: "pending",
-                      feedbackText: "",
+                      feedbackText: mySubmission?.feedbackText || "",
+                      feedbackVideoUrl: mySubmission?.feedbackVideoUrl || "",
                       submittedAt: Date.now(),
                     };
 
@@ -179,18 +292,11 @@ export default function LessonView({
                     e.target.value = "";
                   }}
                 />
-                <small className="help-text">
-                  Progress unlocks only after mentor approval.
-                </small>
               </div>
             )}
 
-            {/* STUDENT FEEDBACK */}
-            {isStudent && mySubmission?.feedbackText && (
-              <div className="feedback-box">
-                <strong>Mentor Feedback</strong>
-                <p>{mySubmission.feedbackText}</p>
-              </div>
+            {isStudent && (
+              <FeedbackPlayer submission={mySubmission} />
             )}
           </div>
         );

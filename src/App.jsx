@@ -9,10 +9,13 @@ import SubmissionsDashboard from "./components/SubmissionsDashboard";
 import StudentProgressBoard from "./components/StudentProgressBoard";
 
 import { calculateCourseProgress } from "./utils/progress";
+import { canMentorSeeCourse } from "./utils/permissions";
+import { getPendingRevisionCount } from "./utils/progress";
 import * as storage from "./utils/storage.js";
 import * as auth from "./utils/authService.js";
 
 import "./styles.css";
+import UserManagement from "./components/UserManagement.jsx";
 
 /* =====================
   CONSTANTS
@@ -41,12 +44,10 @@ function normalizeCourses(courses) {
       modules: (lesson.modules || []).map((mod) => {
         // Already new shape:
         if (mod.assignment) {
-          if (
-            mod.assignment.submission &&
-            !mod.assignment.submissions
-          ) {
-            mod.assignment.submissions = mod.assignment.submission;
-            delete mod.assignment.submission;
+          if (mod.assignment.submission && !mod.assignment.submissions) {
+            mod.assignment.submissions = Array.isArray(mod.assignment.submission)
+              ? mod.assignment.submission
+              : [mod.assignment.submission];
           }
           return mod;
         }
@@ -71,39 +72,54 @@ function normalizeCourses(courses) {
   }));
 }
 
-function matchesStudent(submissionStudent, user) {
-  if (!submissionStudent || !user) return false;
-  return (
-    submissionStudent === user?.studentId ||
-    submissionStudent === user?.email ||
-    submissionStudent === user?.username
-  );
+function getStudentKey(user) {
+  return user?.studentId ?? user?.email ?? user?.username ?? null;
 }
-
 
 function canAccessModuleByPrereq(lesson, modIndex, currentUser) {
   if (modIndex === 0) return true;
 
-  const prevModule = lesson.modules?.[modIndex - 1];
-  const assignment = prevModule?.assignment;
-  if (!assignment) return false;
+  const studentKey = getStudentKey(currentUser);
+  if (!studentKey) return false;
 
-  return (assignment.submissions || []).some(
-    (s) => matchesStudent(s.student, currentUser) && s.status === "approved"
-  );
+  const prevModule = lesson?.modules?.[modIndex - 1];
+  if (!prevModule) return false;
+
+  const assignment = prevModule?.assignment || null;
+
+  // "Repo submission required" ONLY if repoUrl exists
+  const requiresSubmission = !!assignment?.repoUrl;
+
+  // If repo submission is required, unlock only when APPROVED
+  if (requiresSubmission) {
+    const subs = Array.isArray(assignment?.submissions) ? assignment.submissions : [];
+    return subs.some((s) => s?.student === studentKey && s?.status === "approved");
+  }
+
+  // Otherwise it's a content module: unlock when marked complete
+  const completions = Array.isArray(prevModule?.completions) ? prevModule.completions : [];
+  return completions.some((c) => c?.student === studentKey);
 }
 
 function isLessonCompletedForStudent(lesson, currentUser) {
-  const modules = lesson?.modules || [];
+  const studentKey = currentUser?.studentId ?? currentUser?.email ?? currentUser?.username;
+  if (!studentKey) return false;
+
+  const modules = Array.isArray(lesson?.modules) ? lesson.modules : [];
   if (modules.length === 0) return false;
 
-  return modules.every((mod) =>
-    (mod.assignment?.submissions || []).some(
-      (s) => 
-        matchesStudent(s.student, currentUser) &&
-        s.status === "approved"
-    )
-  );
+  return modules.every((mod) => {
+    const assignment = mod?.assignment || null;
+    const requiresSubmission = !!assignment?.repoUrl;
+
+    if (requiresSubmission) {
+      const subs = Array.isArray(assignment?.submissions) ? assignment.submissions : [];
+      return subs.some((s) => s?.student === studentKey && s?.status === "approved");
+    }
+
+    const completions = Array.isArray(mod?.completions) ? mod.completions : [];
+    return completions.some((c) => c?.student === studentKey);
+  });
 }
 
 /* =====================
@@ -130,19 +146,42 @@ export default function App() {
   const isStudent = currentUser?.role === "student";
   const isStaff = currentUser?.role === "admin" || currentUser?.role === "mentor";
 
+  const revisionCount = useMemo(() =>
+    getPendingRevisionCount(courses, currentUser),
+    [courses, currentUser]
+  );
+
+  const revisionList = useMemo(() =>
+    getModulesNeedingRevision(courses, currentUser),
+    [courses, currentUser]
+  );
+  
+  const visibleCourses = useMemo(() => {
+    const list = Array.isArray(courses) ? courses : [];
+    if (!currentUser) return [];
+
+    // mentors only see assigned courses + unassigned courses
+    if (currentUser.role === "mentor") {
+      return list.filter((c) => canMentorSeeCourse(c, currentUser));
+    }
+
+    // admin + students see all courses
+    return list;
+  }, [courses, currentUser]);
+
   const safeViewTitle = useMemo(() => {
     if (!view) return "";
     return String(view).toUpperCase();
   }, [view]);
 
   const selectedCourse = useMemo(
-    () => courses.find((c) => c.id === selectedCourseId) || null,
-    [courses, selectedCourseId]
+    () => visibleCourses.find((c) => c.id === selectedCourseId) || null,
+    [visibleCourses, selectedCourseId]
   );
 
   const courseBeingEdited = useMemo(
-    () => courses.find((c) => c.id === editingCourseId) || null,
-    [courses, editingCourseId]
+    () => visibleCourses.find((c) => c.id === editingCourseId) || null,
+    [visibleCourses, editingCourseId]
   );
 
   const activeLesson = useMemo(() => {
@@ -153,6 +192,10 @@ export default function App() {
   useEffect(() => {
     storage.saveCourses(courses);
   }, [courses]);
+
+  useEffect(() => {
+    storage.saveUsers(users);
+  }, [users]);
 
   useEffect(() => {
     if (currentUser) {
@@ -166,7 +209,7 @@ export default function App() {
 
   useEffect(() => {
     if (!selectedCourseId) return;
-    const exists = courses.some((c) => c.id === selectedCourseId);
+    const exists = visibleCourses.some((c) => c.id === selectedCourseId);
     if (!exists) {
       setSelectedCourseId(null);
       setActiveLessonId(null);
@@ -174,7 +217,7 @@ export default function App() {
       if (view === "courseDetail" || view === "lesson") setView("courses");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [courses]);
+  }, [visibleCourses]);
 
   useEffect(() => {
     document.body.classList.remove("dark", "light");
@@ -206,44 +249,20 @@ export default function App() {
     setView("signin");
   }
 
-  function createAccount(email, password, role, ownerKey, profile) {
-    // Runtime guards
-    if (!email || typeof email !== "string") {
-      alert("Create Account Error: email is required");
-      return;
-    }
-
-    if (!password || typeof password !== "string") {
-      alert("Create Account Error: password is required");
-      return;
-    }
-
-    if (!role || typeof role !== "string") {
-      alert("Create Account Error: role is required");
-      return;
-    }
-
-    if (!profile || typeof profile !== "object") {
-      alert("Create Account Error: profile object is missing");
+  function handleUserCreation(email, password, role, ownerKey, profile) {
+    // 1. Unified validation
+    if (!email || !password || !role || !profile) {
+      alert("All fields are required.");
       return;
     }
 
     const { firstName, lastName, studentId } = profile;
-
     if (!firstName || !lastName) {
-      alert("Create Account Error: first and last name are required");
+      alert("First and last names are required.");
       return;
     }
 
-    if (role === "student" && !studentId) {
-      alert("Create Account Error: studentId is required for students");
-      return;
-    }
-
-    if (role === "admin" && !ownerKey) {
-      alert("Create Account Error: owner key is required for admins");
-      return;
-    }
+    // 2. Call authService logic
     try {
       const updatedUsers = auth.createUser(
         users,
@@ -251,14 +270,24 @@ export default function App() {
         password,
         role,
         ownerKey,
-        profile.firstName,
-        profile.lastName,
-        profile.studentId
+        firstName,
+        lastName,
+        studentId
       );
 
+      // 3. Update state
       setUsers(updatedUsers);
-      alert("Account created");
-      setView("signin");
+
+      // 4. Context-Aware UI Response
+      if (view === "create") {
+        // If they are on the public sign-up screen
+        alert("Account created successfully. Please sign in.");
+        setView("signin");
+      } else {
+        // If you are on the Admin User Management dashboard
+        alert(`Student ${firstName} enrolled successfully.`);
+        // We stay on the current view so you can add the next student
+      }
     } catch (err) {
       alert(err.message);
     }
@@ -270,7 +299,7 @@ export default function App() {
         view={view}
         setView={setView}
         onSignIn={signIn}
-        onCreate={createAccount}
+        onCreate={handleUserCreation}
         theme={theme}
         setTheme={setTheme}
       />
@@ -299,6 +328,52 @@ export default function App() {
     setView("courses");
   }
 
+  function exportBackup() {
+    const payload = {
+      version: 1,
+      exportedAt: Date.now(),
+      users,
+      courses,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
+      type: "application/json",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `pfta-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function importBackup(file) {
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+
+      const nextUsers = Array.isArray(parsed?.users) ? parsed.users : null;
+      const nextCoursesRaw = Array.isArray(parsed?.courses) ? parsed.courses : null;
+
+      if (!nextUsers || !nextCoursesRaw) {
+        alert("Invalid backup file. Expected { users: [], courses: [] }");
+        return;
+      }
+
+      const nextCourses = normalizeCourses(nextCoursesRaw);
+
+      setUsers(nextUsers);
+      setCourses(nextCourses);
+
+      alert("Backup imported successfully.");
+      setView("dashboard");
+    } catch (err) {
+      alert("Import failed: " + err.message);
+    }
+  }
+
+
   /* =====================
     UI
   ===================== */
@@ -312,6 +387,10 @@ export default function App() {
         signOut={signOut}
         theme={theme}
         setTheme={setTheme}
+        onExportBackup={exportBackup}
+        onImportBackup={importBackup}
+        courses={visibleCourses}
+        revisionCount={revisionList.length}
       />
 
       <main id="content">
@@ -333,7 +412,48 @@ export default function App() {
               {currentUser?.role === "student" && (
                 <p>You can view courses, submit assignment, and track your progress.</p>
               )}
+
+              {isStudent && revisionList.length > 0 && (
+                <div className="course-box" style={{
+                  border: "1px solid var(--pf-fire)",
+                  background: "rgba(245, 158, 11, 0.05)",
+                  marginTop: "20px",
+                  padding: "20px"
+                }}>
+                  <h3 style={{ color: "var(--pf-fire)", marginTop: 0 }}>⚠️ Revisions Required</h3>
+                  <p>A mentor has requrested updates on the following assignments. Click below to view the feedback video:</p>
+                  
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "16px" }}>
+                    {revisionList.map((item) => (
+                      <button
+                        key={item.moduleId}
+                        className="btn-inline"
+                        onClick={() => {
+                          setSelectedCourseId(item.courseId);
+                          setActiveLessonId(item.lessonId);
+                          setView("lesson");
+                        }}
+                        style={{ padding: "8px 16px", background: "#1e29eb" }}
+                      >
+                        {item.courseTitle} → {item.moduleTitle}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
+          )}
+
+          {/* USER MANAGEMENT */}
+          {view === "users" && (
+            <UserManagement
+              users={users}
+              currentUser={currentUser}
+              onUserCreated={(usersList, email, pass, role, key, fName, lName, sId) => {
+                // Mapping the flast userManagement props to our profile object structure
+                handleUserCreation(email, pass, role, key, { firstName: fName, lastName: lName, studentId: sId });
+              }}
+            />
           )}
 
           {/* COURSES */}
@@ -342,6 +462,8 @@ export default function App() {
               {courseBeingEdited ? (
                 <CourseEditor
                   course={courseBeingEdited}
+                  users={users}
+                  currentUser={currentUser}
                   onSave={(updatedCourse) => {
                     setCourses((prev) =>
                       prev.map((c) => (c.id === updatedCourse.id ? updatedCourse : c))
@@ -354,7 +476,7 @@ export default function App() {
                 />
               ) : (
                 <CourseList
-                  courses={courses}
+                  courses={visibleCourses}
                   currentUser={currentUser}
                   isStudent={isStudent}
                   isStaff={isStaff}
@@ -531,8 +653,9 @@ export default function App() {
 
           {view === "submissions" && isStaff && (
             <SubmissionsDashboard
-              courses={courses}
+              courses={visibleCourses}
               setCourses={setCourses}
+              currentUser={currentUser}
             />
           )}
 
@@ -604,18 +727,20 @@ export default function App() {
                   </p>
 
                   <StudentProgressBoard
-                    courses={courses}
+                    courses={visibleCourses}
                     users={users}
                   />
                 </>
               )}
             </div>
+
+            
           )}
 
           {/* STAFF PROGRESS BOARD (Mentor/Admin) */}
           {view === "studentProgress" && isStaff && (
             <StudentProgressBoard
-              courses={courses}
+              courses={visibleCourses}
               users={users}
             />
           )}

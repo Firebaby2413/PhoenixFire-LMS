@@ -1,11 +1,35 @@
+import { useRef } from "react";
+import { canMentorSeeCourse } from "../utils/permissions";
 import phoenixLogo from "../assets/Images/phoenix.jpg";
+
 export default function Sidebar({
     currentUser,
     isStudent,
     isStaff,
     setView,
     signOut,
+    onExportBackup,
+    onImportBackup,
+    courses,
+    revisionCount,
 }) {
+    const fileRef = useRef(null);
+    const isAdmin = currentUser?.role === "admin";
+
+    const canSeeSubmissions = (() => {
+        const list = Array.isArray(courses) ? courses : [];
+        for (const course of list) {
+            if (!canMentorSeeCourse(course, currentUser)) continue;
+            for (const lesson of course.lessons || []) {
+                for (const mod of lesson.modules || []) {
+                    const subs = mod?.assignment?.submissions || [];
+                    if (subs.length > 0) return true;
+                }
+            }
+        }
+        return false;
+    })();
+
     return (
         <aside id="sidebar">
             {/* HEADER */}
@@ -27,8 +51,36 @@ export default function Sidebar({
             </div>
 
             {/* SHARED */}
-            <button className="sidebar-btn" onClick={() => setView("dashboard")}>
-                Dashboard
+            <button
+                className="sidebar-btn"
+                onClick={() => setView("dashboard")}
+                style={{ 
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "10px"
+                    }}
+                >
+                    <span>Dashboard</span>
+                    {/* NOTIFICATION BADGE */}
+                    {revisionCount > 0 && (
+                        <span style={{
+                            background: "var(--pf-fire)",
+                            color: "white",
+                            fontSize: "11px",
+                            minWidth: "20px",
+                            height: "20px",
+                            borderRadius: "50%",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: "bold",
+                            boxShadow: "0 0 10px var(--pf-fire)",
+                            padding: "2px"
+                        }}>
+                            {revisionCount}
+                        </span>
+                    )}
             </button>
             <button className="sidebar-btn" onClick={() => setView("courses")}>
                 Courses
@@ -58,9 +110,13 @@ export default function Sidebar({
                 <button className="sidebar-btn" onClick={() => setView("reports")}>
                     Reports
                 </button>
-                <button className="sidebar-btn" onClick={() => setView("submissions")}>
-                    Submissions
-                </button> 
+                    
+                {canSeeSubmissions && (
+                    <button className="sidebar-btn" onClick={() => setView("submissions")}>
+                        Submissions        
+                    </button> 
+                )}
+                    
                 <button className="sidebar-btn" onClick={() => setView("studentProgress")}>
                     Student Progress
                 </button>
@@ -71,11 +127,39 @@ export default function Sidebar({
             )}
 
             {/* ADMIN ONLY */}
-            {currentUser?.role === "admin" && (
+            {isAdmin && (
                 <>
                     <button className="sidebar-btn" onClick={() => setView("users")}>
                         Users
                     </button>
+
+                    <button
+                        className="sidebar-btn"
+                        type="button"
+                        onClick={() => onExportBackup?.()}
+                    >
+                        Export Backup
+                    </button>
+
+                    <button
+                        className="sidebar-btn"
+                        type="button"
+                        onClick={() => fileRef.current?.click()}
+                    >
+                        Import Backup
+                    </button>
+
+                    <input
+                        ref={fileRef}
+                        type="file"
+                        accept="application/json"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) onImportBackup?.(file);
+                            e.target.value = "";
+                        }}
+                    />
                 </>
             )}
 
