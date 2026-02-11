@@ -8,9 +8,8 @@ import LessonView from "./components/LessonView";
 import SubmissionsDashboard from "./components/SubmissionsDashboard";
 import StudentProgressBoard from "./components/StudentProgressBoard";
 
-import { calculateCourseProgress } from "./utils/progress";
+import { calculateCourseProgress, getPendingRevisionCount, getModulesNeedingRevision, getStudentFeedbackHistory } from "./utils/progress";
 import { canMentorSeeCourse } from "./utils/permissions";
-import { getPendingRevisionCount } from "./utils/progress";
 import * as storage from "./utils/storage.js";
 import * as auth from "./utils/authService.js";
 
@@ -352,26 +351,19 @@ export default function App() {
     try {
       const text = await file.text();
       const parsed = JSON.parse(text);
-
-      const nextUsers = Array.isArray(parsed?.users) ? parsed.users : null;
-      const nextCoursesRaw = Array.isArray(parsed?.courses) ? parsed.courses : null;
-
-      if (!nextUsers || !nextCoursesRaw) {
+      if (!Array.isArray(parsed?.users) || !Array.isArray(parsed?.courses)) {
         alert("Invalid backup file. Expected { users: [], courses: [] }");
         return;
       }
-
-      const nextCourses = normalizeCourses(nextCoursesRaw);
-
-      setUsers(nextUsers);
-      setCourses(nextCourses);
-
+      setUsers(parsed.users);
+      setCourses(normalizeCourses(parsed.courses));
       alert("Backup imported successfully.");
       setView("dashboard");
     } catch (err) {
       alert("Import failed: " + err.message);
     }
   }
+  
 
 
   /* =====================
@@ -390,7 +382,7 @@ export default function App() {
         onExportBackup={exportBackup}
         onImportBackup={importBackup}
         courses={visibleCourses}
-        revisionCount={revisionList.length}
+        revisionCount={revisionCount}
       />
 
       <main id="content">
@@ -410,7 +402,7 @@ export default function App() {
               )}
               
               {currentUser?.role === "student" && (
-                <p>You can view courses, submit assignment, and track your progress.</p>
+                <p>You can view courses, submit assignments, and track your progress.</p>
               )}
 
               {isStudent && revisionList.length > 0 && (
@@ -491,11 +483,9 @@ export default function App() {
                     setEditingCourseId(course.id);
                     setView("courses");
                   }}
-                  onDeleteCourse={(course) => {
-                    const ok = window.confirm("Delete this course?");
-                    if (!ok) return;
-
-                    setCourses((prev) => prev.filter((c) => c.id !== course.id));
+                    onDeleteCourse={(course) => {
+                      if (!window.confirm("Delete this course?")) return;
+                      setCourses((prev) => prev.filter((c) => c.id !== course.id));
 
                     if (selectedCourseId === course.id) {
                       setSelectedCourseId(null);
@@ -716,6 +706,44 @@ export default function App() {
                       </div>
                     );
                   })}
+
+                  {/* FEEDBACK HISTORY SECTION */}
+                  <h2 style={{ marginTop: 40, color: "#f472b6" }}>Mentor Feedback Archive</h2>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {getStudentFeedbackHistory(courses, currentUser).length === 0 ? (
+                      <p style={{ color: "#94e3b8"}}>No feedback history found yet.</p>
+                    ) : (
+                        getStudentFeedbackHistory(courses, currentUser).map((item, idx) => (
+                          <div key={idx} className="course-box" style={{ borderLeft: "4px solid #f472b6" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                              <strong style={{ color: "#60a5fa" }}>{item.moduleTitle}</strong>
+                              <span style={{ fontSize: "0.8em", opacity: 0.7 }}>
+                                {new Date(item.date).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <p style={{ margin: 0, fontStyle: "italic" }}>"{item.feedbackText}"</p>
+                            <div style={{ marginTop: "5px", fontSize: "0.85em" }}>
+                              Status: <span style={{ color: item.status === "approved" ? "#22c55e" : "#f59e0b" }}>
+                                {item.status.toUpperCase()}
+                              </span>
+                            </div>
+
+                            <button
+                              className="btn-inline"
+                              style={{ fontSize: "0.75em", padding: "4px 8px" }}
+                              onClick={() => {
+                                setSelectedCourseId(item.courseId);
+                                setActiveLessonId(item.lessonId);
+                                setView("lesson");
+                              }}
+                            >
+                              View Lesson
+                            </button>
+                          </div>
+
+                        ))
+                    )}
+                  </div>
                 </>
               )}
 
@@ -733,8 +761,6 @@ export default function App() {
                 </>
               )}
             </div>
-
-            
           )}
 
           {/* STAFF PROGRESS BOARD (Mentor/Admin) */}

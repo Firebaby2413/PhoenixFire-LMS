@@ -140,3 +140,33 @@ export function getModulesNeedingRevision(courses, student) {
 
     return needingRevision;
 }
+
+export function getStudentFeedbackHistory(courses, currentUser) {
+    if (!currentUser) return [];
+    const studentKey = currentUser.studentId ?? currentUser.email ?? currentUser.username;
+    const history = [];
+
+    courses.forEach((course) => {
+        course.lessons?.forEach((lesson) => {
+            lesson.modules?.forEach((mod) => {
+                const subs = mod.assignment?.submissions || [];
+                //Find submissions by this student that have feedback
+                const studentSubs = subs.filter(s => s.student === studentKey && s.feedback);
+
+                studentSubs.forEach(s => {
+                    history.push({
+                        courseId: course.id,
+                        lessonId: lesson.id,
+                        courseTitle: course.title,
+                        moduleTitle: mod.title,
+                        feedbackText: s.feedback,
+                        status: s.status,
+                        date: s.submittedAt
+                    });
+                });
+            });
+        });
+    });
+
+    return history.sort((a, b) => new Date(b.date) - new Date(a.date));
+}
