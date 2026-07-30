@@ -121,7 +121,7 @@ export function getModulesNeedingRevision(courses, student) {
     courses.forEach((course) => {
         (course.lessons || []).forEach((lesson) => {
             (lesson.modules || []).forEach((mod) => {
-                const submissions = mod.assignemnt?.submissions || [];
+                const submissions = mod.assignment?.submissions || [];
                 const mySub = submissions.find((s) => keys.includes(s.student));
 
                 if (mySub?.status === "revision") {
@@ -150,23 +150,24 @@ export function getStudentFeedbackHistory(courses, currentUser) {
         course.lessons?.forEach((lesson) => {
             lesson.modules?.forEach((mod) => {
                 const subs = mod.assignment?.submissions || [];
-                //Find submissions by this student that have feedback
-                const studentSubs = subs.filter(s => s.student === studentKey && s.feedback);
 
-                studentSubs.forEach(s => {
-                    history.push({
-                        courseId: course.id,
-                        lessonId: lesson.id,
-                        courseTitle: course.title,
-                        moduleTitle: mod.title,
-                        feedbackText: s.feedback,
-                        status: s.status,
-                        date: s.submittedAt
-                    });
+                subs.forEach((s, index) => {
+                    if (s.student === studentKey && s.feedback && s.isRead !== true) {
+                        history.push({
+                            courseId: course.id,
+                            lessonId: lesson.id,
+                            moduleId: mod.id,
+                            subIndex: index,
+                            courseTitle: course.title,
+                            moduleTitle: mod.title,
+                            feedbackText: s.feedback,
+                            status: s.status,
+                            date: s.submittedAt
+                        });
+                    }
                 });
             });
         });
     });
-
     return history.sort((a, b) => new Date(b.date) - new Date(a.date));
 }

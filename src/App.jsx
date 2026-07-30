@@ -126,16 +126,9 @@ function isLessonCompletedForStudent(lesson, currentUser) {
 ===================== */
 export default function App() {
   const [users, setUsers] = useState(() => auth.initializeUsers());
-
   const [currentUser, setCurrentUser] = useState(() => storage.loadCurrentUser());
-    
-
-  const [courses, setCourses] = useState(() => 
-    normalizeCourses(storage.loadCourses())
-  );
-  const [theme, setTheme] = useState(() => {
-    return localStorage.getItem("pf-theme") || "dark";
-  });
+  const [courses, setCourses] = useState(() => normalizeCourses(storage.loadCourses()));
+  const [theme, setTheme] = useState(() => { return localStorage.getItem("pf-theme") || "dark";});
   const [view, setView] = useState("signin"); // signin | dashboard | courses | courseDetail | lesson | progress | studentProgress | submissions | users | messages | reports | settings
   const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [editingCourseId, setEditingCourseId] = useState(null);
@@ -145,48 +138,39 @@ export default function App() {
   const isStudent = currentUser?.role === "student";
   const isStaff = currentUser?.role === "admin" || currentUser?.role === "mentor";
 
-  const revisionCount = useMemo(() =>
-    getPendingRevisionCount(courses, currentUser),
-    [courses, currentUser]
-  );
+  const revisionCount = useMemo(() => getPendingRevisionCount(courses, currentUser), [courses, currentUser]);
 
-  const revisionList = useMemo(() =>
-    getModulesNeedingRevision(courses, currentUser),
-    [courses, currentUser]
-  );
+  const revisionList = useMemo(() => getModulesNeedingRevision(courses, currentUser), [courses, currentUser]);
   
   const visibleCourses = useMemo(() => {
     const list = Array.isArray(courses) ? courses : [];
     if (!currentUser) return [];
 
     // mentors only see assigned courses + unassigned courses
-    if (currentUser.role === "mentor") {
-      return list.filter((c) => canMentorSeeCourse(c, currentUser));
-    }
-
+    if (currentUser.role === "mentor") return list.filter((c) => canMentorSeeCourse(c, currentUser));
     // admin + students see all courses
     return list;
   }, [courses, currentUser]);
 
-  const safeViewTitle = useMemo(() => {
-    if (!view) return "";
-    return String(view).toUpperCase();
-  }, [view]);
+  const safeViewTitle = useMemo(() => view ? String(view).toUpperCase() : "", [view]);
 
-  const selectedCourse = useMemo(
-    () => visibleCourses.find((c) => c.id === selectedCourseId) || null,
+  const selectedCourse = useMemo(() => visibleCourses.find((c) => c.id === selectedCourseId) || null,
     [visibleCourses, selectedCourseId]
-  );
-
-  const courseBeingEdited = useMemo(
-    () => visibleCourses.find((c) => c.id === editingCourseId) || null,
-    [visibleCourses, editingCourseId]
   );
 
   const activeLesson = useMemo(() => {
     if (!selectedCourse || !activeLessonId) return null;
-    return (selectedCourse.lessons || []).find((l) => l.id === activeLessonId) || null;
+    return (
+      (selectedCourse.lessons || []).find((l) => l.id === activeLessonId) ||
+      null
+    );
   }, [selectedCourse, activeLessonId]);
+
+  const courseBeingEdited = useMemo(() => visibleCourses.find((c) => c.id === editingCourseId) || null,
+    [visibleCourses, editingCourseId]
+  );
+
+  
 
   useEffect(() => {
     storage.saveCourses(courses);
@@ -199,24 +183,10 @@ export default function App() {
   useEffect(() => {
     if (currentUser) {
       storage.saveCurrentUser(currentUser);
-      setView("dashboard");
     } else {
       storage.clearCurrentUser();
-      setView("signin");
     }
   }, [currentUser]);
-
-  useEffect(() => {
-    if (!selectedCourseId) return;
-    const exists = visibleCourses.some((c) => c.id === selectedCourseId);
-    if (!exists) {
-      setSelectedCourseId(null);
-      setActiveLessonId(null);
-      setPreviewMode(false);
-      if (view === "courseDetail" || view === "lesson") setView("courses");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleCourses]);
 
   useEffect(() => {
     document.body.classList.remove("dark", "light");
@@ -231,6 +201,7 @@ export default function App() {
     try {
       const user = auth.signInUser(users, email, password);
       setCurrentUser(user);
+      setView("dashboard");
     } catch (err) {
       alert(err.message);
     }
@@ -249,13 +220,14 @@ export default function App() {
   }
 
   function handleUserCreation(email, password, role, ownerKey, profile) {
-    // 1. Unified validation
-    if (!email || !password || !role || !profile) {
-      alert("All fields are required.");
+    // 1. Unified validation - Extract from profile first
+    const { firstName, lastName, studentId, securityQuestion, securityAnswer } = profile;
+
+    if (!email || !password || !role || !securityQuestion || !securityAnswer) {
+      alert("All fields are required, including security questions.");
       return;
     }
 
-    const { firstName, lastName, studentId } = profile;
     if (!firstName || !lastName) {
       alert("First and last names are required.");
       return;
@@ -271,7 +243,9 @@ export default function App() {
         ownerKey,
         firstName,
         lastName,
-        studentId
+        studentId,
+        securityQuestion,
+        securityAnswer
       );
 
       // 3. Update state
@@ -279,13 +253,10 @@ export default function App() {
 
       // 4. Context-Aware UI Response
       if (view === "create") {
-        // If they are on the public sign-up screen
         alert("Account created successfully. Please sign in.");
         setView("signin");
       } else {
-        // If you are on the Admin User Management dashboard
-        alert(`Student ${firstName} enrolled successfully.`);
-        // We stay on the current view so you can add the next student
+        alert(`User ${firstName} enrolled successfully.`);
       }
     } catch (err) {
       alert(err.message);
@@ -299,10 +270,43 @@ export default function App() {
         setView={setView}
         onSignIn={signIn}
         onCreate={handleUserCreation}
+        onResetPassword={handlePasswordReset}
         theme={theme}
         setTheme={setTheme}
       />
     );
+  }
+
+  function handlePasswordReset(email, newPassword, answer) {
+    if (!email || !newPassword || !answer) {
+      alert("Please provide email, a new password, and your security answer.");
+      return false;
+    }
+
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+    if (!user) {
+      alert("No account found with that email address.");
+      return false;
+    }
+
+    // Verify Security Answer (normalize to lowercase/trimmed)
+    if (user.securityAnswer !== answer.toLowerCase().trim()) {
+      alert("Security answer is incorrect.");
+      return false;
+    }
+
+    // Update the users array
+    const updatedUsers = users.map(u =>
+      u.email.toLowerCase() === email.toLowerCase()
+        ? { ...u, password: newPassword }
+        : u
+    );
+
+    setUsers(updatedUsers);
+    alert("Password updated successfully! Please sign in.");
+    setView("signin");
+    return true;
   }
 
   /* =====================
@@ -326,6 +330,34 @@ export default function App() {
     setEditingCourseId(newCourse.id);
     setView("courses");
   }
+
+  function markFeedbackAsRead(courseId, moduleId, subDate) {
+    setCourses((prevCourses) => {
+      return prevCourses.map((c) => {
+        if (c.id !== courseId) return c;
+        return {
+          ...c,
+          lessons: (c.lessons || []).map((l) => ({
+            ...l,
+            modules: (l.modules || []).map((m) => {
+              if (m.id !== moduleId) return m;
+              return {
+                ...m,
+                assignment: {
+                  ...m.assignment,
+                  submissions: (m.assignment?.submissions || []).map((sub) =>
+                    sub.submittedAt === subDate ? { ...sub, isRead: true } : sub
+                  ),
+                },
+              };
+            }),
+          })),
+        };
+      });
+    });
+  }
+  
+  
 
   function exportBackup() {
     const payload = {
@@ -413,7 +445,7 @@ export default function App() {
                   padding: "20px"
                 }}>
                   <h3 style={{ color: "var(--pf-fire)", marginTop: 0 }}>⚠️ Revisions Required</h3>
-                  <p>A mentor has requrested updates on the following assignments. Click below to view the feedback video:</p>
+                  <p>A mentor has requested updates on the following assignments. Click below to view the feedback video:</p>
                   
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "16px" }}>
                     {revisionList.map((item) => (
@@ -440,13 +472,19 @@ export default function App() {
           {view === "users" && (
             <UserManagement
               users={users}
+              courses={courses}
+              calculateCourseProgress={calculateCourseProgress}
               currentUser={currentUser}
-              onUserCreated={(usersList, email, pass, role, key, fName, lName, sId) => {
+              onUserCreated={(usersList, email, pass, role, key, profile) => {
                 // Mapping the flast userManagement props to our profile object structure
-                handleUserCreation(email, pass, role, key, { firstName: fName, lastName: lName, studentId: sId });
+                handleUserCreation(email, pass, role, key, profile);
+              }}
+              onUserDeleted={(userId) => {
+                setUsers(prev => prev.filter(u => u.id !== userId));
               }}
             />
           )}
+
 
           {/* COURSES */}
           {view === "courses" && (
@@ -489,7 +527,12 @@ export default function App() {
 
                     if (selectedCourseId === course.id) {
                       setSelectedCourseId(null);
-                      setView("courses");
+                      setActiveLessonId(null);
+                      setPreviewMode(false);
+
+                      if (view === "courseDetail" || view === "lesson") {
+                        setView("courses")
+                      }
                     }
                   }}
                 />
@@ -637,6 +680,7 @@ export default function App() {
                 setCourses={setCourses}
                 canAccessModuleByPrereq={canAccessModuleByPrereq}
                 newId={newId}
+                markFeedbackAsRead={markFeedbackAsRead}
               />
             </div>
           )}
@@ -732,6 +776,7 @@ export default function App() {
                               className="btn-inline"
                               style={{ fontSize: "0.75em", padding: "4px 8px" }}
                               onClick={() => {
+                                markFeedbackAsRead(item.courseId, item.moduleId, item.date);
                                 setSelectedCourseId(item.courseId);
                                 setActiveLessonId(item.lessonId);
                                 setView("lesson");
@@ -779,23 +824,39 @@ export default function App() {
 /* =====================
   AUTH SCREEN
 ===================== */
-function AuthScreen({ view, setView, onSignIn, onCreate, theme, setTheme }) {
+function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme, setTheme }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [studentId, setStudentId] = useState("");
   const [role, setRole] = useState("student");
   const [ownerKey, setOwnerKey] = useState("");
+  const [securityQuestion, setSecurityQuestion] = useState("");
+  const [securityAnswer, setSecurityAnswer] = useState("");
+
+  const handleResetSubmit = () => {
+    if (password !== confirmPassword) {
+      alert("Passwords do not match!");
+      return;
+    }
+    // Pass the answer to the reset function
+    const success = onResetPassword(email, password, securityAnswer);
+    if (success) {
+      setEmail("");
+      setPassword("");
+      setConfirmPassword("");
+      setSecurityAnswer("");
+    }
+  };
 
   return (
     <div id="auth-container">
       <div id="auth-card">
         <button
           className="theme-toggle"
-          onClick={() => 
-            setTheme(theme === "dark" ? "light" : "dark")
-          }
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
         >
           {theme === "dark" ? "☀️" : "🌙"}
         </button>
@@ -833,7 +894,7 @@ function AuthScreen({ view, setView, onSignIn, onCreate, theme, setTheme }) {
 
             <button
               className="btn-secondary"
-              onClick={() => alert("Password recovery coming soon")}
+              onClick={() => setView("forgot")}
             >
               Forgot Password?
             </button>
@@ -885,6 +946,19 @@ function AuthScreen({ view, setView, onSignIn, onCreate, theme, setTheme }) {
               onChange={(e) => setPassword(e.target.value)}
             />
 
+            <select className="input-wide" value={securityQuestion} onChange={(e) => setSecurityQuestion(e.target.value)}>
+              <option value="">Select Security Question</option>
+              <option value="What was the name of your first pet?">What was the name of your first pet?</option>
+              <option value="What city were you born in?">What city were you born in?</option>
+              <option value="What was your first car?">What was your first car?</option>
+            </select>
+            <input
+              className="input-wide"
+              placeholder="Security Answer"
+              value={securityAnswer}
+              onChange={(e) => setSecurityAnswer(e.target.value)}
+            />
+
             <select
               className="input-wide"
               value={role}
@@ -905,16 +979,13 @@ function AuthScreen({ view, setView, onSignIn, onCreate, theme, setTheme }) {
             <button
               className="btn"
               onClick={() =>
-                onCreate(
-                  email,
-                  password,
-                  role,
-                  ownerKey,
-                  {
-                    firstName,
-                    lastName,
-                    studentId,
-                  })
+                onCreate(email, password, role, ownerKey, {
+                  firstName,
+                  lastName,
+                  studentId,
+                  securityQuestion,
+                  securityAnswer
+                })
               }
             >
               Create Account
@@ -925,14 +996,67 @@ function AuthScreen({ view, setView, onSignIn, onCreate, theme, setTheme }) {
             </button>
           </>
         )}
+
+        {/* FORGOT PASSWORD */}
+        {view === "forgot" && (
+          <>
+            <h2>Reset Password</h2>
+            <p
+              style={{
+                fontSize: "0.85em",
+                color: "#cbd5e1",
+                marginBottom: "10px",
+              }}
+            >
+              Enter your email to reset your password.
+            </p>
+
+            <input
+              className="input-wide"
+              placeholder="Account Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+
+            <input
+              className="input-wide"
+              placeholder="Security Answer"
+              value={securityAnswer}
+              onChange={(e) => setSecurityAnswer(e.target.value)}
+            />
+
+            <input
+              className="input-wide"
+              type="password"
+              placeholder="New Password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+
+            <input
+              className="input-wide"
+              type="password"
+              placeholder="Confirm New Password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+
+            <button
+              className="btn"
+              onClick={handleResetSubmit}
+            >
+              Update Password
+            </button>
+
+            <button className="btn-secondary" onClick={() => setView("signin")}>
+              Back to Sign In
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 }
-
-
-
-
-            
 
 
