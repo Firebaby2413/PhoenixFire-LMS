@@ -83,44 +83,6 @@ export default function UserManagement({
     }
   };
 
-  const handleExportCSV = () => {
-    if (!users || users.length === 0) return;
-
-    const headers = [
-      'First Name',
-      'Last Name',
-      'Email',
-      'Enrolled Courses',
-      'Overall Progress (%)'
-    ];
-
-    const rows = users.map((u) => {
-      const progress = getOverallProgress?.(u) || 0;
-      const courseCount = u.enrolledCourses?.length || 0;
-
-      const firstName = `"${(u.firstName || '').replace(/"/g, '""')}"`;
-      const lastName = `"${(u.lastName || '').replace(/"/g, '""')}"`;
-      const email = `"${(u.email || '').replace(/"/g, '""')}"`;
-
-      return [firstName, lastName, email, courseCount, progress];
-    });
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute(
-      'download',
-      `student_roster_${new Date().toISOString().slice(0, 10)}.csv`
-    );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const downloadStudentReport = () => {
     const headers = [
       'Student Name',
@@ -167,6 +129,7 @@ export default function UserManagement({
       <div
         style={{
           display: 'flex',
+          justifySpaceBetween: 'space-between',
           justifyContent: 'space-between',
           alignItems: 'flex-end',
           marginBottom: '20px'
@@ -399,7 +362,7 @@ export default function UserManagement({
         >
           <h2 style={{ margin: 0 }}>Student Roster</h2>
           <button
-            onClick={handleExportCSV}
+            onClick={downloadStudentReport}
             type='button'
             className='btn-secondary'
           >

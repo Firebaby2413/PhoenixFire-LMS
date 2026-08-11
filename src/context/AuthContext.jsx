@@ -1,32 +1,19 @@
-import React, { useState } from 'react';
-import { AuthContext } from './createAuthContext';
+import { createContext, useContext } from 'react';
 
-export function AuthProvider({ children }) {
-  // Temporary mock user - will be replaced with Supabase Auth later
-  const [currentUser, setCurrentUser] = useState({
-    id: 'admin-1',
-    firstName: 'Admin',
-    lastName: 'User',
-    email: 'admin@pfta.edu',
-    role: 'admin'
-  });
+// 1. Create Context
+export const AuthContext = createContext({
+  currentUser: null,
+  loading: true,
+  login: async () => {},
+  signUp: async () => {},
+  logout: async () => {}
+});
 
-  const login = (email, password) => {
-    // Placeholder for login logic
-    console.log(
-      'Logging in with:',
-      email,
-      password ? '[PASSWORD_PROVIDED]' : ''
-    );
-  };
-
-  const logout = () => {
-    setCurrentUser(null);
-  };
-
-  return (
-    <AuthContext.Provider value={{ currentUser, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
+// 2. Custom Hook for consuming context
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

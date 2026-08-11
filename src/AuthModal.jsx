@@ -40,19 +40,19 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
 
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
-      password
+      password,
     });
 
     setLoading(false);
     if (error) {
       setErrorMsg(error.message);
     } else {
-      onAuthSuccess(data.user);
+      if (onAuthSuccess) onAuthSuccess(data.user);
       onClose();
     }
   };
 
-  // 2. Sign Up Handler (Supabase Auth + Metadata / Profile Insert)
+  // 2. Sign Up Handler
   const handleSignUp = async (e) => {
     e.preventDefault();
     resetFeedback();
@@ -64,7 +64,7 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
 
     setLoading(true);
 
-    // Sign up the user in Supabase Auth
+    // Pass all user profile data directly into auth metadata
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -73,9 +73,11 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
           first_name: firstName,
           last_name: lastName,
           student_id: studentId,
-          role: role
-        }
-      }
+          security_question: securityQuestion,
+          security_answer: securityAnswer,
+          role: role,
+        },
+      },
     });
 
     if (authError) {
@@ -84,33 +86,30 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
       return;
     }
 
-    // Insert extra profile details into a public 'profiles' table
-    if (authData.user) {
-      const { error: profileError } = await supabase.from('profiles').insert([
+    // Try inserting into public.profiles if session exists (e.g. Email Confirm disabled)
+    // If confirmation is required, metadata will be synced upon confirmation.
+    if (authData?.user) {
+      const { error: profileError } = await supabase.from('profiles').upsert([
         {
           id: authData.user.id,
           first_name: firstName,
           last_name: lastName,
           student_id: studentId,
           security_question: securityQuestion,
-          security_answer: securityAnswer, // Note: Hash or secure in production
-          role: role
-        }
+          security_answer: securityAnswer,
+          role: role,
+        },
       ]);
 
-      if (profileError) {
-        setErrorMsg(
-          'Account created, but profile failed to save: ' + profileError.message
-        );
-      } else {
-        setSuccessMsg(
-          'Account created successfully! Check your email for verification.'
-        );
-        setTimeout(() => switchView('signin'), 2000);
+      if (profileError && profileError.code !== '42501') {
+        // Ignore RLS permission error (42501) if email confirm is pending
+        console.warn('Profile table sync pending email verification:', profileError.message);
       }
     }
 
     setLoading(false);
+    setSuccessMsg('Account created successfully! Please check your email to verify your account.');
+    setTimeout(() => switchView('signin'), 3000);
   };
 
   // 3. Reset Password Handler
@@ -125,9 +124,8 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
 
     setLoading(true);
 
-    // Send password reset email via Supabase Auth
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`
+      redirectTo: `${window.location.origin}/reset-password`,
     });
 
     setLoading(false);
@@ -140,47 +138,47 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
   };
 
   return (
-    <div className='modal-overlay'>
-      <div className='modal-content'>
-        {errorMsg && <div className='alert alert-error'>{errorMsg}</div>}
-        {successMsg && <div className='alert alert-success'>{successMsg}</div>}
+    <div className="modal-overlay">
+      <div className="modal-content">
+        {errorMsg && <div className="alert alert-error">{errorMsg}</div>}
+        {successMsg && <div className="alert alert-success">{successMsg}</div>}
 
         {/* --- SIGN IN VIEW --- */}
         {view === 'signin' && (
           <form onSubmit={handleSignIn}>
             <h2>Sign In</h2>
             <input
-              className='input-wide'
-              type='email'
-              placeholder='Email'
+              className="input-wide"
+              type="email"
+              placeholder="Email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
             <input
-              className='input-wide'
-              type='password'
-              placeholder='Password'
+              className="input-wide"
+              type="password"
+              placeholder="Password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
 
-            <button className='btn' type='submit' disabled={loading}>
+            <button className="btn" type="submit" disabled={loading}>
               {loading ? 'Signing In...' : 'Sign In'}
             </button>
 
-            <div className='auth-links'>
+            <div className="auth-links">
               <button
-                type='button'
-                className='btn-link'
+                type="button"
+                className="btn-link"
                 onClick={() => switchView('create')}
               >
                 Create Account
               </button>
               <button
-                type='button'
-                className='btn-link'
+                type="button"
+                className="btn-link"
                 onClick={() => switchView('forgot')}
               >
                 Forgot Password?
@@ -195,94 +193,94 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
             <h2>Create Account</h2>
 
             <input
-              className='input-wide'
-              type='text'
-              placeholder='First Name'
+              className="input-wide"
+              type="text"
+              placeholder="First Name"
               required
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
             />
             <input
-              className='input-wide'
-              type='text'
-              placeholder='Last Name'
+              className="input-wide"
+              type="text"
+              placeholder="Last Name"
               required
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
             />
             <input
-              className='input-wide'
-              type='email'
-              placeholder='Email'
+              className="input-wide"
+              type="email"
+              placeholder="Email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
             <input
-              className='input-wide'
-              type='text'
-              placeholder='Student / Member ID'
+              className="input-wide"
+              type="text"
+              placeholder="Student / Member ID"
               value={studentId}
               onChange={(e) => setStudentId(e.target.value)}
             />
             <input
-              className='input-wide'
-              type='password'
-              placeholder='Password'
+              className="input-wide"
+              type="password"
+              placeholder="Password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
             <input
-              className='input-wide'
-              type='password'
-              placeholder='Confirm Password'
+              className="input-wide"
+              type="password"
+              placeholder="Confirm Password"
               required
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
             />
 
             <select
-              className='input-wide'
+              className="input-wide"
               value={securityQuestion}
               onChange={(e) => setSecurityQuestion(e.target.value)}
             >
-              <option value='What was the name of your first pet?'>
+              <option value="What was the name of your first pet?">
                 What was the name of your first pet?
               </option>
-              <option value='What city were you born in?'>
+              <option value="What city were you born in?">
                 What city were you born in?
               </option>
-              <option value='What was your first car?'>
+              <option value="What was your first car?">
                 What was your first car?
               </option>
             </select>
 
             <input
-              className='input-wide'
-              type='text'
-              placeholder='Security Answer'
+              className="input-wide"
+              type="text"
+              placeholder="Security Answer"
               required
               value={securityAnswer}
               onChange={(e) => setSecurityAnswer(e.target.value)}
             />
 
             <select
-              className='input-wide'
+              className="input-wide"
               value={role}
               onChange={(e) => setRole(e.target.value)}
             >
-              <option value='student'>Student</option>
-              <option value='mentor'>Mentor</option>
-              <option value='admin'>Admin</option>
+              <option value="student">Student</option>
+              <option value="mentor">Mentor</option>
+              <option value="admin">Admin</option>
             </select>
 
-            <button className='btn' type='submit' disabled={loading}>
+            <button className="btn" type="submit" disabled={loading}>
               {loading ? 'Creating Account...' : 'Create Account'}
             </button>
             <button
-              type='button'
-              className='btn-secondary'
+              type="button"
+              className="btn-secondary"
               onClick={() => switchView('signin')}
             >
               Back
@@ -298,28 +296,28 @@ export default function AuthModal({ isOpen, onClose, onAuthSuccess }) {
               style={{
                 fontSize: '0.85em',
                 color: '#cbd5e1',
-                marginBottom: '10px'
+                marginBottom: '10px',
               }}
             >
               Enter your registered email to receive a password reset link.
             </p>
 
             <input
-              className='input-wide'
-              placeholder='Account Email'
-              type='email'
+              className="input-wide"
+              placeholder="Account Email"
+              type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
 
-            <button className='btn' type='submit' disabled={loading}>
+            <button className="btn" type="submit" disabled={loading}>
               {loading ? 'Sending Link...' : 'Send Reset Link'}
             </button>
 
             <button
-              type='button'
-              className='btn-secondary'
+              type="button"
+              className="btn-secondary"
               onClick={() => switchView('signin')}
             >
               Back to Sign In

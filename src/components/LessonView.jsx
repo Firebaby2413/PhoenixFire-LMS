@@ -2,24 +2,30 @@ import React from 'react';
 import MarkdownPreview from './MarkdownPreview';
 import '../styles.css';
 
-/* HELPER COMPONENT FOR VIDEO FEEDBACK */
+/**
+ * Extracts YouTube embed URL from various YouTube link formats.
+ */
+function getYouTubeEmbedUrl(url) {
+  if (!url) return null;
+  const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+  const match = url.match(regExp);
+  return match && match[2].length === 11
+    ? `https://www.youtube.com/embed/${match[2]}`
+    : null;
+}
+
+/**
+ * Helper component to render mentor feedback text and video response.
+ */
 function FeedbackPlayer({ submission }) {
-  // Only render if there is actual feedback data (text or video)
-  if (!submission || (!submission.feedbackText && !submission.feedbackVideoUrl))
+  if (
+    !submission ||
+    (!submission.feedbackText && !submission.feedbackVideoUrl)
+  ) {
     return null;
+  }
 
-  const getEmbedUrl = (url) => {
-    if (!url) return null;
-    // Standard YouTube regex to find video ID and convert to embed format
-    const regExp =
-      /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-    const match = url.match(regExp);
-    return match && match[2].length === 11
-      ? `https://www.youtube.com/embed/${match[2]}`
-      : null;
-  };
-
-  const embedUrl = getEmbedUrl(submission.feedbackVideoUrl);
+  const embedUrl = getYouTubeEmbedUrl(submission.feedbackVideoUrl);
 
   return (
     <div
@@ -39,7 +45,7 @@ function FeedbackPlayer({ submission }) {
           marginBottom: '8px'
         }}
       >
-        📋 Mentor Feedback & Revision Notes
+        📋 Mentor Feedback &amp; Revision Notes
       </strong>
 
       {submission.feedbackText && (
@@ -89,14 +95,12 @@ export default function LessonView({
   selectedCourseId,
   currentUser,
   isStudent,
-  isStaff,
   previewMode,
   setCourses,
   canAccessModuleByPrereq,
   newId
 }) {
   if (!lesson) return null;
-  void isStaff;
 
   const studentKey =
     currentUser?.studentId ?? currentUser?.email ?? currentUser?.username;
@@ -106,6 +110,84 @@ export default function LessonView({
       submissionStudent === user?.studentId ||
       submissionStudent === user?.email ||
       submissionStudent === user?.username
+    );
+  }
+
+  // Pure updater function accepting timestamp from event handler
+  function handleMarkComplete(modId, completedAt) {
+    if (!studentKey) {
+      alert('Missing student identifier (studentId/email/username).');
+      return;
+    }
+
+    setCourses((prev) =>
+      (prev || []).map((course) =>
+        course.id !== selectedCourseId
+          ? course
+          : {
+              ...course,
+              lessons: (course.lessons || []).map((l) =>
+                l.id !== lesson.id
+                  ? l
+                  : {
+                      ...l,
+                      modules: (l.modules || []).map((m) =>
+                        m.id !== modId
+                          ? m
+                          : {
+                              ...m,
+                              completions: [
+                                ...(m.completions || []).filter(
+                                  (c) => c?.student !== studentKey
+                                ),
+                                {
+                                  student: studentKey,
+                                  completedAt
+                                }
+                              ]
+                            }
+                      )
+                    }
+              )
+            }
+      )
+    );
+  }
+
+  // Pure updater function accepting calculated submission payload
+  function handleSubmission(modId, assignment, submissions, submissionPayload) {
+    setCourses((prev) =>
+      (prev || []).map((course) =>
+        course.id !== selectedCourseId
+          ? course
+          : {
+              ...course,
+              lessons: (course.lessons || []).map((l) =>
+                l.id !== lesson.id
+                  ? l
+                  : {
+                      ...l,
+                      modules: (l.modules || []).map((m) =>
+                        m.id !== modId
+                          ? m
+                          : {
+                              ...m,
+                              assignment: {
+                                ...(assignment || {}),
+                                submissions: [
+                                  ...(submissions || []).filter(
+                                    (s) =>
+                                      !matchesStudent(s.student, currentUser)
+                                  ),
+                                  submissionPayload
+                                ]
+                              }
+                            }
+                      )
+                    }
+              )
+            }
+      )
     );
   }
 
@@ -126,30 +208,23 @@ export default function LessonView({
         );
 
         const requiresSubmission = !!assignment?.repoUrl;
-
-        // Content module = no repo required
         const isContentModule = !requiresSubmission;
 
         const isCompleted = isContentModule
           ? (mod.completions || []).some((c) => c?.student === studentKey)
           : mySubmission?.status === 'approved';
 
-        const embedVideoUrl = assignment?.instructionsVideoUrl?.includes(
-          'watch?v='
-        )
-          ? assignment.instructionsVideoUrl.replace('watch?v=', 'embed/')
-          : assignment?.instructionsVideoUrl;
+        const embedVideoUrl = getYouTubeEmbedUrl(
+          assignment?.instructionsVideoUrl
+        );
 
         let statusLabel = 'Not Submitted';
         let statusColor = 'badge-pending';
 
-        // Content module completion
         if (isContentModule && isCompleted) {
           statusLabel = 'Completed';
           statusColor = 'badge-approved';
-        }
-
-        if (requiresSubmission && mySubmission) {
+        } else if (requiresSubmission && mySubmission) {
           if (mySubmission.status === 'pending') {
             statusLabel = 'Submitted (Pending Review)';
             statusColor = 'badge-pending';
@@ -193,46 +268,9 @@ export default function LessonView({
                   type='button'
                   disabled={!studentKey || isCompleted}
                   onClick={() => {
-                    if (!studentKey) {
-                      alert(
-                        'Missing student identifier (studentId/email/username).'
-                      );
-                      return;
-                    }
-
-                    setCourses((prev) =>
-                      (prev || []).map((course) =>
-                        course.id !== selectedCourseId
-                          ? course
-                          : {
-                              ...course,
-                              lessons: (course.lessons || []).map((l) =>
-                                l.id !== lesson.id
-                                  ? l
-                                  : {
-                                      ...l,
-                                      modules: (l.modules || []).map((m) =>
-                                        m.id !== mod.id
-                                          ? m
-                                          : {
-                                              ...m,
-                                              completions: [
-                                                ...(m.completions || []).filter(
-                                                  (c) =>
-                                                    c?.student !== studentKey
-                                                ),
-                                                {
-                                                  student: studentKey,
-                                                  completedAt: Date.now()
-                                                }
-                                              ]
-                                            }
-                                      )
-                                    }
-                              )
-                            }
-                      )
-                    );
+                    // Impure Date call performed safely at exact user action
+                    const now = Date.now();
+                    handleMarkComplete(mod.id, now);
                   }}
                 >
                   {isCompleted ? 'Completed ✅' : 'Mark Complete'}
@@ -240,7 +278,7 @@ export default function LessonView({
               </div>
             )}
 
-            {/* ASSIGNMENT (VISIBLE TO STUDENTS + STAFF) */}
+            {/* ASSIGNMENT DETAILS */}
             {unlocked && assignment && (
               <div className='assignment-box'>
                 <h5 className='assignment-title'>Assignment</h5>
@@ -277,7 +315,7 @@ export default function LessonView({
               </div>
             )}
 
-            {/* STUDENT SUBMISSION */}
+            {/* STUDENT SUBMISSION INPUT */}
             {isStudent && unlocked && requiresSubmission && assignment && (
               <div className='submission-box'>
                 <input
@@ -291,7 +329,7 @@ export default function LessonView({
                     if (e.key !== 'Enter') return;
 
                     const url = e.target.value.trim();
-                    if (!url || !studentKey) return;
+                    if (!url) return;
 
                     if (!studentKey) {
                       alert(
@@ -300,51 +338,29 @@ export default function LessonView({
                       return;
                     }
 
-                    const submission = {
-                      id: mySubmission?.id || newId(),
+                    // Impure functions executed strictly in event boundary
+                    const now = Date.now();
+                    const submissionId =
+                      mySubmission?.id ||
+                      (typeof newId === 'function'
+                        ? newId()
+                        : `${now}_${Math.random()}`);
+
+                    const submissionPayload = {
+                      id: submissionId,
                       student: studentKey,
                       url,
                       status: 'pending',
                       feedbackText: mySubmission?.feedbackText || '',
                       feedbackVideoUrl: mySubmission?.feedbackVideoUrl || '',
-                      submittedAt: Date.now()
+                      submittedAt: now
                     };
 
-                    setCourses((prev) =>
-                      prev.map((course) =>
-                        course.id === selectedCourseId
-                          ? {
-                              ...course,
-                              lessons: course.lessons.map((l) =>
-                                l.id === lesson.id
-                                  ? {
-                                      ...l,
-                                      modules: l.modules.map((m) =>
-                                        m.id === mod.id
-                                          ? {
-                                              ...m,
-                                              assignment: {
-                                                ...assignment,
-                                                submissions: [
-                                                  ...submissions.filter(
-                                                    (s) =>
-                                                      !matchesStudent(
-                                                        s.student,
-                                                        currentUser
-                                                      )
-                                                  ),
-                                                  submission
-                                                ]
-                                              }
-                                            }
-                                          : m
-                                      )
-                                    }
-                                  : l
-                              )
-                            }
-                          : course
-                      )
+                    handleSubmission(
+                      mod.id,
+                      assignment,
+                      submissions,
+                      submissionPayload
                     );
 
                     e.target.value = '';
@@ -353,6 +369,7 @@ export default function LessonView({
               </div>
             )}
 
+            {/* MENTOR FEEDBACK */}
             {isStudent && <FeedbackPlayer submission={mySubmission} />}
           </div>
         );

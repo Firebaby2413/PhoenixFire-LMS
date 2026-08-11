@@ -1,53 +1,40 @@
-/* LOCAL STORAGE ADAPTER */
-/* Temporary. Will be replaced by Supabase */
-const LS_USERS = "pfta_users";
-const LS_CURRENT = "pfta_CurrentUser";
-const LS_COURSES = "pfta_courses";
+import { supabase } from './supabaseClient';
 
+/**
+ * COURSES (Supabase API)
+ * Fetch and save course data directly from your Supabase PostgreSQL database.
+ */
+export async function loadCourses() {
+  const { data, error } = await supabase
+    .from('courses')
+    .select('*');
 
-console.log("✅ USING storage.js FROM:", import.meta.url);
-/* USERS */
-export function loadUsers() {
-    try {
-        const stored = JSON.parse(localStorage.getItem(LS_USERS) || "[]");
-        return Array.isArray(stored) ? stored : [];
-    } catch {
-        return [];
-    }
+  if (error) {
+    console.error('Error fetching courses from Supabase:', error.message);
+    return [];
+  }
+  return data || [];
 }
 
-export function saveUsers(users) {
-    localStorage.setItem(LS_USERS, JSON.stringify(users));
+export async function saveCourses(courses) {
+  const { data, error } = await supabase
+    .from('courses')
+    .upsert(courses)
+    .select();
+
+  if (error) {
+    console.error('Error saving courses to Supabase:', error.message);
+    throw error;
+  }
+  return data;
 }
 
-/* CURRENT USER */
-export function loadCurrentUser() {
-    try {
-        return JSON.parse(localStorage.getItem(LS_CURRENT) || "null");
-    } catch {
-        return null;
-    }
-}
-
-export function saveCurrentUser(user) {
-    localStorage.setItem(LS_CURRENT, JSON.stringify(user));
-}
-
-export function clearCurrentUser() {
-    localStorage.removeItem("pfta_CurrentUser");
-}
-
-/* COURSES */
-export function loadCourses() {
-    try {
-        const stored = JSON.parse(localStorage.getItem(LS_COURSES) || "[]");
-        return Array.isArray(stored) ? stored : [];
-    } catch {
-        return [];
-    }
-}
-
-export function saveCourses(courses) {
-    localStorage.setItem(LS_COURSES, JSON.stringify(courses));
-}
-
+/**
+ * DEPRECATED USER STORAGE
+ * Auth and user state are now handled dynamically via AuthProvider.jsx / Supabase Auth.
+ */
+export function loadCurrentUser() { return null; }
+export function saveCurrentUser() {}
+export function clearCurrentUser() {}
+export function loadUsers() { return []; }
+export function saveUsers() {}

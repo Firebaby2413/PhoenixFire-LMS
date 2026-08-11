@@ -1,23 +1,32 @@
-/* ============= RESET ============= */
+/* ==========================================================================
+   1. RESET & BASE LAYOUT
+   ========================================================================== */
 * {
   box-sizing: border-box;
 }
 
-
 body {
   margin: 0;
   font-family: Arial, sans-serif;
-  transition: background 0.3s, color 0.3s;
+  transition:
+    background 0.3s,
+    color 0.3s;
 }
 
 html,
 body,
 #root {
+  margin: 0;
+  padding: 0;
   height: 100%;
+  width: 100%;
+  min-height: 100vh;
+  box-sizing: border-box;
 }
 
-
-/* ============= THEME COLORS (from your logo) ============= */
+/* ==========================================================================
+   2. THEME COLORS & VARIABLES
+   ========================================================================== */
 :root {
   --phoenix-orange: #ff6a00;
   --phoenix-pink: #ff4da6;
@@ -30,54 +39,129 @@ body,
   --dark-panel: #0b1120;
   --dark-card: #020617;
 
-  --light-bg: #d4d4d8; /* soft gray, not pure white */
-  --light-panel: #e5e7eb;
-  --light-card: #f3f4f6;
+  --light-bg: #f8fafc;
+  --light-panel: #e2e8f0;
+  --light-card: #ffffff;
+  --light-text: #0f172a;
+  --light-border: #cbd5e1;
 }
 
-/* ============= DARK / LIGHT MODES ============= */
-body.dark {
+/* ==========================================================================
+   3. DARK / LIGHT MODES
+   ========================================================================== */
+/* Dark Mode Rules */
+body.dark,
+body.dark-theme,
+#app-wrapper.dark {
   background: radial-gradient(circle at top, #1f2937 0, var(--dark-bg) 50%);
   color: #f9fafb;
 }
 
-body.light {
+/* Light Mode Rules */
+body.light,
+body.light-theme,
+#app-wrapper.light {
   background: var(--light-bg);
-  color: #111827;
+  color: var(--light-text);
 }
 
 /* Dark-mode panels */
 body.dark #auth-card,
+body.dark-theme #auth-card,
+#app-wrapper.dark #auth-card,
 body.dark #content,
+body.dark-theme #content,
+#app-wrapper.dark #content,
 body.dark .course-box,
+body.dark-theme .course-box,
+#app-wrapper.dark .course-box,
 body.dark .lesson-box,
+body.dark-theme .lesson-box,
+#app-wrapper.dark .lesson-box,
 body.dark .module-box,
-body.dark .card {
+body.dark-theme .module-box,
+#app-wrapper.dark .module-box,
+body.dark .card,
+body.dark-theme .card,
+#app-wrapper.dark .card {
   background: var(--dark-card);
   border: 1px solid #111827;
+  color: #f9fafb;
 }
 
 /* Light-mode panels */
 body.light #auth-card,
-body.light .card {
+body.light-theme #auth-card,
+#app-wrapper.light #auth-card,
+body.light .card,
+body.light-theme .card,
+#app-wrapper.light .card {
   background: var(--light-card);
-  border: 1px solid #cbd5f5;
+  border: 1px solid var(--light-border);
+  color: var(--light-text);
 }
 
 body.light #content,
+body.light-theme #content,
+#app-wrapper.light #content,
 body.light .course-box,
+body.light-theme .course-box,
+#app-wrapper.light .course-box,
 body.light .lesson-box,
-body.light .module-box {
+body.light-theme .lesson-box,
+#app-wrapper.light .lesson-box,
+body.light .module-box,
+body.light-theme .module-box,
+#app-wrapper.light .module-box {
   background: var(--light-card);
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--light-border);
+  color: var(--light-text);
 }
 
-/* Utility */
+/* Light-mode Inputs & Textarea Overrides */
+body.light .input-wide,
+body.light-theme .input-wide,
+#app-wrapper.light .input-wide,
+body.light input,
+body.light-theme input,
+#app-wrapper.light input,
+body.light textarea,
+body.light-theme textarea,
+#app-wrapper.light textarea {
+  background-color: #ffffff;
+  color: var(--light-text);
+  border: 1px solid var(--light-border);
+}
+
+/* Light-mode Sidebar Adjustments */
+body.light #sidebar,
+body.light-theme #sidebar,
+#app-wrapper.light #sidebar {
+  background: #e2e8f0;
+}
+
+body.light .sidebar-btn,
+body.light-theme .sidebar-btn,
+#app-wrapper.light .sidebar-btn,
+body.light .sidebar-logo-text,
+body.light-theme .sidebar-logo-text,
+#app-wrapper.light .sidebar-logo-text {
+  color: var(--light-text);
+}
+
+body.light .sidebar-btn:hover,
+body.light-theme .sidebar-btn:hover,
+#app-wrapper.light .sidebar-btn:hover {
+  background: rgba(255, 106, 0, 0.15);
+}
+
+/* ==========================================================================
+   4. UTILITIES & HELPER CLASSES
+   ========================================================================== */
 .hidden {
-  display: none !important; 
+  display: none !important;
 }
 
-/* React Bridge/ Utility classes */
 .pf-card,
 .course-card,
 .lesson-card,
@@ -87,6 +171,21 @@ body.light .module-box {
   border-radius: 12px;
   border: 1px solid var(--phoenix-orange);
   background: rgba(15, 23, 42, 0.9);
+}
+
+body.light .pf-card,
+body.light-theme .pf-card,
+#app-wrapper.light .pf-card,
+body.light .course-card,
+body.light-theme .course-card,
+#app-wrapper.light .course-card,
+body.light .lesson-card,
+body.light-theme .lesson-card,
+#app-wrapper.light .lesson-card,
+body.light .module-card,
+body.light-theme .module-card,
+#app-wrapper.light .module-card {
+  background: var(--light-card);
 }
 
 .pf-title {
@@ -111,7 +210,7 @@ body.light .module-box {
   font-weight: 700;
 }
 
-.badge-pending {
+.badge.pending {
   background: var(--phoenix-purple);
   color: #fff;
 }
@@ -126,36 +225,101 @@ body.light .module-box {
   color: #020617;
 }
 
-/* Submission UI helpers */
-.submission-box {
-  margin-top: 14px;
-}
-
-.feedback-box {
-  margin-top: 14px;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--phoenix-purple);
-  background: var(--dark-panel);
-}
-
-/* Progress */
-.course-progress {
-  margin-bottom: 12px;
-}
-
-.course-progress-bar {
-  background: #334155;
-  height: 12px;
+.status-badge {
+  display: inline-block;
+  padding: 2px 10px;
   border-radius: 999px;
-  overflow: hidden;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #111827;
 }
 
-.course-progress-fill {
-  height: 100%;
+.badge-pending {
+  background: var(--phoenix-purple);
+  color: #fff;
 }
 
-/* Inline action buttons */
+.badge-revision {
+  background: var(--phoenix-orange);
+}
+
+.badge-approved {
+  background: var(--magic-blue);
+}
+
+/* ==========================================================================
+   5. BUTTONS & ACTIONS
+   ========================================================================== */
+.btn {
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: none;
+  background: linear-gradient(
+    120deg,
+    var(--phoenix-orange),
+    var(--phoenix-pink),
+    var(--magic-blue)
+  );
+  color: #111827;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  transition: filter 0.2s ease-in-out;
+}
+
+.btn:hover {
+  filter: brightness(1.15);
+}
+
+.btn-primary {
+  background: linear-gradient(
+    120deg,
+    var(--phoenix-orange),
+    var(--phoenix-pink),
+    var(--magic-blue)
+  );
+  border: none;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: #111827;
+}
+
+.btn-secondary {
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  border: 2px solid var(--phoenix-orange);
+  background: transparent;
+  color: var(--phoenix-orange);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  transition: all 0.2s ease-in-out;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 106, 0, 0.2);
+  color: var(--phoenix-orange);
+}
+
+.btn-outline {
+  border: 2px solid var(--phoenix-orange);
+  background: transparent;
+  color: var(--phoenix-orange);
+  border-radius: 999px;
+  padding: 8px 12px;
+}
+
+.btn-outline:hover {
+  background: rgba(255, 106, 0, 0.2);
+}
+
 .course-actions {
   display: flex;
   gap: 8px;
@@ -166,7 +330,35 @@ body.light .module-box {
   width: auto;
   margin-top: 0;
 }
-/* ============= AUTH (LOGIN / CREATE ACCOUNT) ============= */
+
+/* ==========================================================================
+   6. INPUTS & FORM ELEMENTS
+   ========================================================================== */
+.input-wide {
+  width: 100%;
+  padding: 10px 11px;
+  margin-top: 10px;
+  border-radius: 10px;
+  border: 1px solid #374151;
+  background: #020617;
+  color: #f9fafb;
+}
+
+.input-wide:focus {
+  border-color: var(--phoenix-orange);
+  outline: 2px solid var(--phoenix-orange);
+  outline-offset: 1px;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* ==========================================================================
+   7. AUTH UI (LOGIN / CREATE ACCOUNT)
+   ========================================================================== */
 #auth-container {
   min-height: 100vh;
   display: flex;
@@ -202,7 +394,7 @@ body.light .module-box {
 #auth-card .input-wide {
   margin-top: 10px;
 }
-/* theme toggle inside card */
+
 .theme-toggle {
   position: absolute;
   top: 14px;
@@ -222,7 +414,6 @@ body.light .module-box {
   border-radius: 12px;
 }
 
-/* Bold gradient title, like logo colors */
 .app-title {
   text-align: center;
   margin: 0 0 20px;
@@ -239,76 +430,15 @@ body.light .module-box {
   color: transparent;
 }
 
-/* Auth headings */
 #signin-form h2,
 #create-form h2 {
   margin: 0 0 12px;
   text-align: center;
 }
 
-/* Inputs */
-.input-wide {
-  width: 100%;
-  padding: 10px 11px;
-  margin-top: 10px;
-  border-radius: 10px;
-  border: 1px solid #374151;
-  background: #020617;
-  color: #f9fafb;
-}
-
-.input-wide:focus {
-  border-color: var(--phoenix-orange);
-  outline: 2px solid var(--phoenix-orange);
-  outline-offset: 1px;
-}
-
-/* Buttons */
-/* BUTTONS */
-.btn {
-  width: 100%;
-  margin-top: 14px;
-  padding: 10px 12px;
-  border-radius: 999px;
-  border: none;
-  background: linear-gradient(
-    120deg,
-    var(--phoenix-orange),
-    var(--phoenix-pink),
-    var(--magic-blue)
-  );
-  color: #111827;
-  cursor: pointer;
-  font-size: 16px;
-  font-weight: 600;
-  transition: filter 0.2s ease-in-out;
-}
-
-.btn:hover {
-  filter: brightness(1.15);
-}
-
-.btn-secondary {
-  width: 100%;
-  margin-top: 10px;
-  padding: 10px 12px;
-  border-radius: 999px;
-  border: 2px solid var(--phoenix-orange);
-  background: transparent;
-  color: var(--phoenix-orange);
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 600;
-  transition: all 0.2s ease-in-out;
-}
-
-.btn-secondary:hover {
-  background: rgba(255, 106, 0, 0.2);
-  color: #fff;
-}
-
-
-/* ============= APP LAYOUT AFTER LOGIN ============= */
+/* ==========================================================================
+   8. MAIN APP LAYOUT (AFTER LOGIN)
+   ========================================================================== */
 #layout {
   display: flex;
   height: 100vh;
@@ -328,7 +458,6 @@ body.light .module-box {
   flex-direction: column;
 }
 
-/* Sidebar header */
 .sidebar-header {
   display: flex;
   flex-direction: column;
@@ -351,7 +480,6 @@ body.light .module-box {
   color: #e5e7eb;
 }
 
-/* Sidebar buttons */
 .sidebar-btn {
   width: 100%;
   text-align: left;
@@ -370,7 +498,6 @@ body.light .module-box {
   background: rgba(255, 106, 0, 0.18);
 }
 
-/* Sidebar user info */
 .sidebar-user {
   margin-bottom: 10px;
 }
@@ -384,7 +511,6 @@ body.light .module-box {
   font-weight: 600;
 }
 
-/* Logout accent */
 .sidebar-logout {
   margin-top: auto;
   border-color: #ef4444;
@@ -395,20 +521,18 @@ body.light .module-box {
   background: rgba(239, 68, 68, 0.2);
 }
 
-/* ============= MAIN CONTENT AREA ============= */
+/* MAIN CONTENT AREA */
 #content {
   flex: 1;
   padding: 20px;
   overflow-y: auto;
 }
 
-/* Section container (centered content width) */
 .section-container {
   max-width: 960px;
   margin: 0 auto;
 }
 
-/* CARD for placeholder screens */
 .card {
   padding: 18px 16px;
   border-radius: 14px;
@@ -416,7 +540,6 @@ body.light .module-box {
   background: rgba(15, 23, 42, 0.9);
 }
 
-/* Courses, lessons, modules (when you re-layer full logic) */
 .course-box,
 .lesson-box,
 .module-box {
@@ -427,7 +550,56 @@ body.light .module-box {
   background: rgba(15, 23, 42, 0.9);
 }
 
+.lesson-title,
+.module-title {
+  margin-top: 0;
+}
 
+/* Submissions, Progress, and Feedback */
+.assignment-box {
+  margin-top: 16px;
+}
+
+.assignment-video {
+  width: 100%;
+  height: 320px;
+  margin-top: 12px;
+}
+
+.submission-box {
+  margin-top: 14px;
+}
+
+.feedback-box {
+  margin-top: 14px;
+  padding: 15px;
+  border-radius: 10px;
+  border: 1px solid var(--phoenix-purple);
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 20px;
+}
+
+.locked-text {
+  font-style: italic;
+}
+
+.course-progress {
+  margin-bottom: 12px;
+}
+
+.course-progress-bar {
+  background: #334155;
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.course-progress-fill {
+  height: 100%;
+}
+
+/* Markdown Rendering */
 .module-markdown h1,
 .module-markdown h2,
 .module-markdown h3 {
@@ -435,15 +607,9 @@ body.light .module-box {
 }
 
 .module-markdown code {
-  background: rgba(0,0,0,0.2);
+  background: rgba(0, 0, 0, 0.2);
   padding: 2px 6px;
   border-radius: 4px;
-}
-
-.module-preview summary {
-  cursor: pointer;
-  font-weight: bold;
-  margin-bottom: 6px;
 }
 
 .module-markdown pre {
@@ -458,6 +624,11 @@ body.light .module-box {
   text-decoration: underline;
 }
 
+.module-preview summary {
+  cursor: pointer;
+  font-weight: bold;
+  margin-bottom: 6px;
+}
 
 .active-msg {
   border: 1px solid var(--pf-fire) !important;
@@ -465,46 +636,42 @@ body.light .module-box {
   box-shadow: 0 0 10px rgba(245, 258, 22, 0.2);
 }
 
-.feedback-box {
-  background: rgba(255, 255, 255, 0.03);
-  padding: 15px;
-  border-radius: 10px;
-  margin-bottom: 20px;
-}
-
-/* Scrollbar for Dark mode */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-track {
-  background: var(--pf-bg);
-}
-::-webit-scrollbar-thumb {
-  background: var(--pr-border);
-  border-radius: 10px;
-}
-
 .table-row-hover:hover {
   background: rgba(255, 255, 255, 0.02);
   transition: background 0.2s ease;
 }
 
-.input-group {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--pf-bg, #050816);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--pf-border, rgba(148, 163, 184, 0.3));
+  border-radius: 10px;
 }
 
+/* Animations */
 .animate-fade-in {
   animation: fadeIn 0.4s ease-out;
 }
 
 @keyframes fadeIn {
-  from { 
+  from {
     opacity: 0;
     transform: translateY(5px);
   }
-  to { opacity: 1;
-    transform: translateY(0); 
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Optional Light Mode Media Defaults from Index */
+@media (prefers-color-scheme: light) {
+  a:hover {
+    color: #747bff;
   }
 }
