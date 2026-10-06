@@ -1,528 +1,457 @@
 import React, { useState } from 'react';
-import '../styles.css';
 
-export default function UserManagement({
-  users = [],
-  onUserCreated,
-  onUserDeleted,
-  currentUser,
-  courses = [],
-  calculateCourseProgress
-}) {
+const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated, onUserDeleted }) => {
+  const [editingUserId, setEditingUserId] = useState(null);
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     email: '',
+    phone: '',
     password: '',
+    role: 'student',
     studentId: '',
-    ownerKey: '',
-    securityQuestion: '',
-    securityAnswer: ''
+    streetAddress: '',
+    addressLine2: '',
+    city: '',
+    state: '',
+    zipCode: '',
+    country: 'USA',
+    emergencyContactName: '',
+    emergencyContactPhone: ''
   });
 
-  const [msg, setMsg] = useState({ text: '', type: '' });
-
-  const formatRelativeDate = (dateString) => {
-    if (!dateString) return 'Never';
-    const date = new Date(dateString);
-    return (
-      date.toLocaleDateString() +
-      ' ' +
-      date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    );
-  };
-
-  const getOverallProgress = (user) => {
-    if (!courses || courses.length === 0) return 0;
-    const studentKey = user.studentId || user.email;
-    const total = courses.reduce(
-      (acc, c) => acc + (calculateCourseProgress?.(c, studentKey) || 0),
-      0
-    );
-    return Math.round(total / courses.length);
-  };
-
-  if (currentUser?.role !== 'admin') {
-    return <div className='section-container'>Access Denied</div>;
+  const userRole = currentUser?.role?.toLowerCase() || '';
+  if (userRole !== 'admin') {
+    return <div className="section-container card">Access Denied</div>;
   }
 
-  const handleEnroll = async (e) => {
-    e.preventDefault();
-    try {
-      onUserCreated?.(
-        users,
-        formData.email,
-        formData.password,
-        'student',
-        formData.ownerKey,
-        {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          studentId: formData.studentId,
-          securityQuestion: formData.securityQuestion,
-          securityAnswer: formData.securityAnswer
-        }
-      );
-
-      setMsg({ text: 'Student enrolled successfully!', type: 'success' });
-      setFormData({
-        firstName: '',
-        lastName: '',
-        email: '',
-        password: '',
-        studentId: '',
-        ownerKey: '',
-        securityQuestion: '',
-        securityAnswer: ''
-      });
-    } catch (err) {
-      setMsg({
-        text: err.message || 'Failed to enroll student.',
-        type: 'error'
-      });
-    }
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
-  const downloadStudentReport = () => {
+  const handleEditClick = (user) => {
+    setEditingUserId(user.id || user.email);
+    setFormData({
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      email: user.email || '',
+      phone: user.phone || '',
+      password: user.password || '',
+      role: user.role || 'student',
+      studentId: user.studentId || '',
+      streetAddress: user.streetAddress || '',
+      addressLine2: user.addressLine2 || '',
+      city: user.city || '',
+      state: user.state || '',
+      zipCode: user.zipCode || '',
+      country: user.country || 'USA',
+      emergencyContactName: user.emergencyContactName || '',
+      emergencyContactPhone: user.emergencyContactPhone || ''
+    });
+
+    // Smooth scroll up to form when editing
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleCancelEdit = () => {
+    setEditingUserId(null);
+    resetForm();
+  };
+
+  const resetForm = () => {
+    setFormData({
+      firstName: '',
+      lastName: '',
+      email: '',
+      phone: '',
+      password: '',
+      role: 'student',
+      studentId: '',
+      streetAddress: '',
+      addressLine2: '',
+      city: '',
+      state: '',
+      zipCode: '',
+      country: 'USA',
+      emergencyContactName: '',
+      emergencyContactPhone: ''
+    });
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.email) return;
+
+    if (editingUserId) {
+      onUserUpdated?.(editingUserId, formData);
+      setEditingUserId(null);
+    } else {
+      if (!formData.password) return;
+      onUserCreated?.(users, formData);
+    }
+
+    resetForm();
+  };
+
+  // Export CSV for ALL Students
+  const exportAllCSV = () => {
+    const studentUsers = users.filter((u) => u.role === 'student');
+    exportCSVData(studentUsers, 'all_students_progress_report.csv');
+  };
+
+  // Export CSV for a SINGLE Student
+  const exportSingleCSV = (user) => {
+    exportCSVData([user], `student_${user.studentId || user.email}_report.csv`);
+  };
+
+  const exportCSVData = (userList, filename) => {
     const headers = [
-      'Student Name',
+      'First Name',
+      'Last Name',
       'Email',
+      'Phone',
       'Student ID',
-      'Last Login',
-      'Overall Progress %'
+      'Role',
+      'Street Address',
+      'City',
+      'State',
+      'Zip',
+      'Emergency Contact Name',
+      'Emergency Contact Phone',
+      'Progress (%)'
     ];
-    const rows = users
-      .filter((u) => u.role === 'student')
-      .map((u) => {
-        const prog = getOverallProgress(u);
-        return [
-          `${u.firstName || ''} ${u.lastName || ''}`.trim() || 'N/A',
-          u.email || 'N/A',
-          u.studentId || 'N/A',
-          u.lastLogin ? new Date(u.lastLogin).toLocaleString() : 'Never',
-          `${prog}%`
-        ];
-      });
 
-    const csvContent = [headers, ...rows]
-      .map((row) =>
-        row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')
-      )
-      .join('\n');
+    const rows = userList.map((u) => [
+      u.firstName || '',
+      u.lastName || '',
+      u.email || '',
+      u.phone || '',
+      u.studentId || '',
+      u.role || 'student',
+      u.streetAddress || '',
+      u.city || '',
+      u.state || '',
+      u.zipCode || '',
+      u.emergencyContactName || '',
+      u.emergencyContactPhone || '',
+      u.progress || 0
+    ]);
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.map((val) => `"${val}"`).join(','))].join('\n');
+
+    const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute(
-      'download',
-      `PFTA_Student_Report_${new Date().toISOString().slice(0, 10)}.csv`
-    );
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
   return (
-    <div className='section-container animate-fade-in'>
-      <div
-        style={{
-          display: 'flex',
-          justifySpaceBetween: 'space-between',
-          justifyContent: 'space-between',
-          alignItems: 'flex-end',
-          marginBottom: '20px'
-        }}
-      >
-        <h2 className='pf-title' style={{ margin: 0 }}>
-          User Management
-        </h2>
-        <button
-          className='btn-secondary'
-          onClick={downloadStudentReport}
-          style={{ padding: '8px 16px', fontSize: '12px' }}
-        >
-          📥 Export Student Data (CSV)
-        </button>
+    <div className="section-container animate-fade-in">
+      <div className="form-header-banner">
+        <h2>User Management &amp; Student Enrollment</h2>
+        <p>
+          Enrolled student contact details are restricted to Administrator views. Students may update
+          their own information via Profile Settings.
+        </p>
       </div>
 
-      <div
-        className='course-box'
-        style={{
-          border: '1px solid var(--pf-border)',
-          background: 'rgba(15, 23, 42, 0.6)'
-        }}
-      >
-        <h3
-          style={{
-            marginTop: 0,
-            color: 'var(--pf-fire)',
-            fontSize: '1.1rem',
-            textTransform: 'uppercase',
-            letterSpacing: '1px'
-          }}
-        >
-          Manual Student Enrollment
-        </h3>
+      {/* Enrolment / Creation / Editing Form */}
+      <form onSubmit={handleSubmit} className="card form-container styled-form-card">
+        <div className="form-section-title">
+          <h3>
+            {editingUserId ? 'Edit User / Student Record' : '1. Account Credentials & Role'}
+          </h3>
+        </div>
 
-        <form
-          onSubmit={handleEnroll}
-          style={{ display: 'grid', gap: '15px', marginTop: '20px' }}
-        >
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: '15px'
-            }}
-          >
-            <div className='input-group'>
-              <label className='help-text'>First Name</label>
-              <input
-                className='input-wide'
-                placeholder='e.g. John'
-                value={formData.firstName}
-                onChange={(e) =>
-                  setFormData({ ...formData, firstName: e.target.value })
-                }
-                required
-              />
-            </div>
-            <div className='input-group'>
-              <label className='help-text'>Last Name</label>
-              <input
-                className='input-wide'
-                placeholder='e.g. Doe'
-                value={formData.lastName}
-                onChange={(e) =>
-                  setFormData({ ...formData, lastName: e.target.value })
-                }
-                required
-              />
-            </div>
+        <div className="form-grid">
+          <div className="form-field">
+            <label className="form-label">
+              Role <span className="required-star">*</span>
+            </label>
+            <select
+              name="role"
+              className="input-wide form-control styled-input"
+              value={formData.role}
+              onChange={handleChange}
+            >
+              <option value="student">Student</option>
+              <option value="ta">TA</option>
+              <option value="instructor">Instructor</option>
+              <option value="mentor">Mentor</option>
+              <option value="admin">Admin</option>
+            </select>
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '2fr 1fr',
-              gap: '15px'
-            }}
-          >
-            <div className='input-group'>
-              <label className='help-text'>Email Address</label>
-              <input
-                className='input-wide'
-                type='email'
-                placeholder='student@pfta.edu'
-                value={formData.email}
-                onChange={(e) =>
-                  setFormData({ ...formData, email: e.target.value })
-                }
-                required
-              />
-            </div>
-            <div className='input-group'>
-              <label className='help-text'>Student ID</label>
-              <input
-                className='input-wide'
-                placeholder='PFTA-000'
-                value={formData.studentId}
-                onChange={(e) =>
-                  setFormData({ ...formData, studentId: e.target.value })
-                }
-                required
-              />
-            </div>
-          </div>
-
-          <div className='input-group'>
-            <label className='help-text'>Temporary Password</label>
+          <div className="form-field">
+            <label className="form-label">Student / User ID</label>
             <input
-              className='input-wide'
-              type='password'
-              placeholder='********'
-              value={formData.password}
-              onChange={(e) =>
-                setFormData({ ...formData, password: e.target.value })
-              }
-              required
+              type="text"
+              name="studentId"
+              className="input-wide form-control styled-input"
+              placeholder="e.g. STU-2026-01"
+              value={formData.studentId}
+              onChange={handleChange}
             />
           </div>
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1.5fr 1fr',
-              gap: '15px'
-            }}
-          >
-            <div className='input-group'>
-              <label className='help-text'>Security Question</label>
-              <select
-                className='input-wide'
-                value={formData.securityQuestion}
-                onChange={(e) =>
-                  setFormData({ ...formData, securityQuestion: e.target.value })
-                }
-                required
-              >
-                <option value=''>Select a challenge...</option>
-                <option value='What was the name of your first pet?'>
-                  First pet's name
-                </option>
-                <option value='What city were you born in?'>Birth city?</option>
-                <option value='What was your first car?'>
-                  First car model?
-                </option>
-              </select>
-            </div>
-            <div className='input-group'>
-              <label className='help-text'>Security Answer</label>
-              <input
-                className='input-wide'
-                placeholder='Answer...'
-                value={formData.securityAnswer}
-                onChange={(e) =>
-                  setFormData({ ...formData, securityAnswer: e.target.value })
-                }
-                required
-              />
-            </div>
-          </div>
-
-          <div
-            style={{
-              padding: '15px',
-              background: 'rgba(245, 158, 11, 0.08)',
-              borderRadius: '12px',
-              border: '1px solid rgba(245, 158, 11, 0.3)',
-              marginTop: '10px'
-            }}
-          >
-            <label
-              className='help-text'
-              style={{ color: 'var(--pf-fire)', fontWeight: 'bold' }}
-            >
-              Owner Key Verification
+          <div className="form-field">
+            <label className="form-label">
+              Email Address <span className="required-star">*</span>
             </label>
             <input
-              className='input-wide'
-              type='password'
-              style={{ borderColor: 'rgba(245, 158, 11, 0.4)' }}
-              placeholder='Enter Creation Key'
-              value={formData.ownerKey}
-              onChange={(e) =>
-                setFormData({ ...formData, ownerKey: e.target.value })
-              }
+              type="email"
+              name="email"
+              className="input-wide form-control styled-input"
+              placeholder="student@example.com"
+              value={formData.email}
+              onChange={handleChange}
               required
             />
           </div>
 
-          <button type='submit' className='btn' style={{ marginTop: '10px' }}>
-            Confirm & Enroll Student
-          </button>
-          {msg.text && (
-            <p
-              style={{
-                color: msg.type === 'success' ? '#22c55e' : '#ef4444',
-                textAlign: 'center',
-                fontWeight: 'bold'
-              }}
-            >
-              {msg.text}
-            </p>
-          )}
-        </form>
-      </div>
+          <div className="form-field">
+            <label className="form-label">
+              Password {!editingUserId && <span className="required-star">*</span>}
+            </label>
+            <input
+              type="password"
+              name="password"
+              className="input-wide form-control styled-input"
+              placeholder={editingUserId ? '(Leave blank to keep existing)' : '••••••••'}
+              value={formData.password}
+              onChange={handleChange}
+              required={!editingUserId}
+            />
+          </div>
+        </div>
 
-      <h3
-        className='pf-title'
-        style={{ marginTop: '40px', fontSize: '1.2rem' }}
-      >
-        Active Student Roster
-      </h3>
-      <div
-        className='course-box'
-        style={{
-          padding: 0,
-          overflow: 'hidden',
-          border: '1px solid var(--pf-border)'
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '15px',
-            borderBottom: '1px solid var(--pf-border)'
-          }}
-        >
-          <h2 style={{ margin: 0 }}>Student Roster</h2>
-          <button
-            onClick={downloadStudentReport}
-            type='button'
-            className='btn-secondary'
-          >
-            Export CSV
+        <div className="form-section-title" style={{ marginTop: '24px' }}>
+          <h3>2. Detailed Student Profile</h3>
+        </div>
+
+        <div className="form-grid">
+          <div className="form-field">
+            <label className="form-label">First Name</label>
+            <input
+              type="text"
+              name="firstName"
+              className="input-wide form-control styled-input"
+              placeholder="First name"
+              value={formData.firstName}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Last Name</label>
+            <input
+              type="text"
+              name="lastName"
+              className="input-wide form-control styled-input"
+              placeholder="Last name"
+              value={formData.lastName}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Phone Number</label>
+            <input
+              type="tel"
+              name="phone"
+              className="input-wide form-control styled-input"
+              placeholder="(555) 000-0000"
+              value={formData.phone}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Street Address</label>
+            <input
+              type="text"
+              name="streetAddress"
+              className="input-wide form-control styled-input"
+              placeholder="123 Main St"
+              value={formData.streetAddress}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Address Line 2</label>
+            <input
+              type="text"
+              name="addressLine2"
+              className="input-wide form-control styled-input"
+              placeholder="Apt, Suite, Unit, etc."
+              value={formData.addressLine2}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">City</label>
+            <input
+              type="text"
+              name="city"
+              className="input-wide form-control styled-input"
+              placeholder="City"
+              value={formData.city}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">State / Province</label>
+            <input
+              type="text"
+              name="state"
+              className="input-wide form-control styled-input"
+              placeholder="State"
+              value={formData.state}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Zip / Postal Code</label>
+            <input
+              type="text"
+              name="zipCode"
+              className="input-wide form-control styled-input"
+              placeholder="Zip code"
+              value={formData.zipCode}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Emergency Contact Name</label>
+            <input
+              type="text"
+              name="emergencyContactName"
+              className="input-wide form-control styled-input"
+              placeholder="Contact Name"
+              value={formData.emergencyContactName}
+              onChange={handleChange}
+            />
+          </div>
+
+          <div className="form-field">
+            <label className="form-label">Emergency Contact Phone</label>
+            <input
+              type="tel"
+              name="emergencyContactPhone"
+              className="input-wide form-control styled-input"
+              placeholder="(555) 000-0000"
+              value={formData.emergencyContactPhone}
+              onChange={handleChange}
+            />
+          </div>
+        </div>
+
+        {/* Centered Form Buttons */}
+        <div className="form-actions form-actions-center">
+          {editingUserId && (
+            <button
+              type="button"
+              className="btn-secondary btn-inline"
+              onClick={handleCancelEdit}
+              style={{ marginRight: '12px' }}
+            >
+              Cancel
+            </button>
+          )}
+          <button type="submit" className="btn btn-primary btn-inline">
+            {editingUserId ? 'Update Student Record' : 'Enroll & Save User'}
           </button>
         </div>
-        <table
-          style={{ width: '100%', borderCollapse: 'collapse', color: '#fff' }}
-        >
-          <thead
-            style={{
-              background: 'rgba(255, 255, 255, 0.03)',
-              borderBottom: '2px solid var(--pf-border)'
-            }}
-          >
-            <tr style={{ textAlign: 'left' }}>
-              <th style={{ padding: '15px' }}>Student Profile</th>
-              <th>Internal ID</th>
-              <th>Overall Progress</th>
-              <th>Status</th>
-              <th>Last Activity</th>
-              <th style={{ textAlign: 'right', paddingRight: '20px' }}>
-                Management
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {users
-              .filter((u) => u.role === 'student')
-              .map((u, index) => {
-                const prog = getOverallProgress(u) || 0;
+      </form>
+
+      {/* Roster / Directory Section */}
+      <div className="card styled-form-card" style={{ marginTop: '32px' }}>
+        <div className="roster-header">
+          <div>
+            <h3 style={{ margin: 0 }}>Registered Users Directory</h3>
+            <p className="roster-subtext">Viewing all system accounts and privacy parameters.</p>
+          </div>
+          <button onClick={exportAllCSV} className="btn-outline btn-inline">
+            Export All Students (CSV)
+          </button>
+        </div>
+
+        <div className="table-responsive">
+          <table className="custom-table">
+            <thead>
+              <tr>
+                <th>User / Name</th>
+                <th>Role</th>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map((u, index) => {
+                const fullName = [u.firstName, u.lastName].filter(Boolean).join(' ');
                 return (
-                  <tr
-                    key={u.id || u.email || index}
-                    className='table-row-hover'
-                    style={{ borderBottom: '1px solid var(--pf-border)' }}
-                  >
-                    <td style={{ padding: '15px' }}>
-                      <div
-                        style={{ fontWeight: 'bold', color: 'var(--pf-fire)' }}
-                      >
-                        {u.firstName} {u.lastName}
-                      </div>
-                      <div style={{ fontSize: '11px', opacity: 0.5 }}>
-                        {u.email}
-                      </div>
-                    </td>
-                    <td
-                      style={{
-                        fontSize: '13px',
-                        fontFamily: 'monospace',
-                        opacity: 0.8
-                      }}
-                    >
-                      {u.studentId || 'NO-ID'}
-                    </td>
-                    <td style={{ minWidth: '140px' }}>
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '4px'
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontSize: '10px',
-                            opacity: 0.8,
-                            fontWeight: 'bold'
-                          }}
-                        >
-                          {prog}%
-                        </div>
-                        <div
-                          style={{
-                            height: '6px',
-                            width: '100px',
-                            background: 'rgba(255, 255, 255, 0.1)',
-                            borderRadius: '10px',
-                            overflow: 'hidden'
-                          }}
-                        >
-                          <div
-                            style={{
-                              height: '100%',
-                              width: `${prog}%`,
-                              background:
-                                prog === 100 ? '#22c55e' : 'var(--pf-fire)',
-                              boxShadow:
-                                prog > 0
-                                  ? `0 0 8px ${prog === 100 ? '#22c55e' : 'var(--pf-fire)'}`
-                                  : 'none',
-                              transition: 'width 0.6s ease-out'
-                            }}
-                          />
-                        </div>
-                      </div>
+                  <tr key={u.id || index} className="table-row-hover">
+                    <td>
+                      <div className="user-cell-main">{fullName || 'Unnamed User'}</div>
                     </td>
                     <td>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px'
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: '10px',
-                            height: '10px',
-                            borderRadius: '50%',
-                            background: u.lastLogin ? '#22c55e' : '#f59e0b',
-                            boxShadow: u.lastLogin
-                              ? '0 0 10px #22c55e'
-                              : '0 0 5px #f59e0b'
-                          }}
-                        />
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            color: u.lastLogin ? '#22c55e' : '#f59e0b',
-                            fontWeight: 'bold'
-                          }}
+                      <span className={`role-badge role-${u.role || 'student'}`}>
+                        {u.role || 'student'}
+                      </span>
+                    </td>
+                    <td><code>{u.studentId || 'N/A'}</code></td>
+                    <td><a href={`mailto:${u.email}`} className="contact-link">{u.email}</a></td>
+                    <td>{u.phone ? <a href={`tel:${u.phone}`} className="contact-link">{u.phone}</a> : '—'}</td>
+                    <td>
+                      <div className="action-button-group">
+                        <button
+                          type="button"
+                          className="btn-action-link edit-link"
+                          onClick={() => handleEditClick(u)}
+                          title="Edit User Profile"
                         >
-                          {u.lastLogin ? 'ACTIVE' : 'PENDING'}
-                        </span>
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-action-link csv-link"
+                          onClick={() => exportSingleCSV(u)}
+                          title="Export CSV for this user"
+                        >
+                          CSV
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-action-link danger-link"
+                          onClick={() => onUserDeleted?.(u.id || u.email)}
+                          title="Revoke Access"
+                        >
+                          Revoke
+                        </button>
                       </div>
-                    </td>
-                    <td style={{ fontSize: '12px', opacity: 0.7 }}>
-                      {formatRelativeDate(u.lastLogin)}
-                    </td>
-                    <td style={{ textAlign: 'right', paddingRight: '20px' }}>
-                      <button
-                        className='btn-inline'
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.1)',
-                          color: '#ef4444',
-                          border: '1px solid rgba(239, 68, 68, 0.3)',
-                          padding: '5px 12px',
-                          fontSize: '11px'
-                        }}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Permanently remove ${u.firstName} ${u.lastName}?`
-                            )
-                          ) {
-                            onUserDeleted?.(u.id || u.email);
-                          }
-                        }}
-                      >
-                        Revoke Access
-                      </button>
                     </td>
                   </tr>
                 );
               })}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
-}
+};
+
+export default UserManagement;

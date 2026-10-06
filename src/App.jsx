@@ -1,148 +1,133 @@
 import React, { useState, useEffect } from 'react';
+import Sidebar from './components/Sidebar';
+import StudentBoard from './components/StudentProgressBoard';
+import CourseEditor from './components/CourseEditor';
+import CourseList from './components/CourseList';
+import LessonView from './components/LessonView';
+import Messages from './components/Messages';
+import SubmissionsDashboard from './components/SubmissionsDashboard';
+import UserManagement from './components/UserManagement';
+import Dashboard from './components/Dashboard';
 
-/* ==========================================================================
-   HELPERS & DATA STRUCTURES
-   ========================================================================== */
+import { useAuth } from './context/AuthContext';
+import { exportData, importData, deleteCourse } from './utils/storage';
+import './styles.css';
 
-// Helper to extract student feedback history across all courses
-const getStudentFeedbackHistory = (courses, currentUser) => {
-  if (!currentUser || !courses) return [];
-  const history = [];
+// Helper function to sanitize courses and strip orphaned/placeholder modules
+const sanitizeCourses = (rawCourses) => {
+  if (!Array.isArray(rawCourses)) return [];
+  
+  return rawCourses.map((course) => {
+    if (!course || !course.lessons) return course;
 
-  courses.forEach((course) => {
-    if (course.modules) {
-      course.modules.forEach((module) => {
-        if (module.feedback && module.feedback[currentUser.id]) {
-          const userFeedbackList = module.feedback[currentUser.id];
-          if (Array.isArray(userFeedbackList)) {
-            userFeedbackList.forEach((fb) => {
-              history.push({
-                courseId: course.id,
-                courseTitle: course.title,
-                moduleId: module.id,
-                moduleTitle: module.title,
-                lessonId: module.lessonId || null,
-                feedbackText: fb.text || fb.feedback || '',
-                date: fb.date || fb.timestamp || new Date().toISOString(),
-                status: fb.status || 'pending'
-              });
-            });
-          }
-        }
-      });
+    return {
+      ...course,
+      lessons: course.lessons.map((lesson) => {
+        if (!lesson || !lesson.modules) return lesson;
+
+        return {
+          ...lesson,
+          modules: lesson.modules.filter((mod) => {
+            const modTitle = mod.title || mod.name || '';
+            if (!mod.id || modTitle === 'New Module') {
+              return false;
+            }
+            return true;
+          }),
+        };
+      }),
+    };
+  });
+};
+
+export default function App() {
+  const { currentUser: authUser, logout: contextLogout } = useAuth() || {};
+
+  const [users, setUsers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('app_users');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error('Failed to parse users from localStorage', e);
+      return [];
     }
   });
 
-  return history.sort((a, b) => new Date(b.date) - new Date(a.date));
-};
+  const [courses, setCourses] = useState(() => {
+    try {
+      const saved = localStorage.getItem('app_courses');
+      const parsed = saved ? JSON.parse(saved) : [];
+      return sanitizeCourses(parsed);
+    } catch (e) {
+      console.error('Failed to parse courses from localStorage', e);
+      return [];
+    }
+  });
 
-/* ==========================================================================
-   SUB-COMPONENTS
-   ========================================================================== */
+  const [localUser, setLocalUser] = useState(null);
 
-function StudentProgressBoard({ courses, users }) {
-  const students = users ? users.filter((u) => u.role === 'student') : [];
+  useEffect(() => {
+    localStorage.setItem('app_users', JSON.stringify(users));
+  }, [users]);
 
-  return (
-    <div style={{ marginTop: '20px' }}>
-      <h3>Student Progress Tracking</h3>
-      {students.length === 0 ? (
-        <p>No students registered.</p>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          {students.map((student) => (
-            <div key={student.id} className='course-box'>
-              <h4>
-                {student.firstName || student.email} {student.lastName || ''} (
-                {student.studentId || 'No ID'})
-              </h4>
-              <ul>
-                {courses.map((course) => {
-                  const totalModules = course.modules
-                    ? course.modules.length
-                    : 0;
-                  const approvedModules = course.modules
-                    ? course.modules.filter(
-                        (m) =>
-                          m.feedback &&
-                          m.feedback[student.id] &&
-                          m.feedback[student.id].some(
-                            (f) => f.status === 'approved'
-                          )
-                      ).length
-                    : 0;
-                  const percent =
-                    totalModules > 0
-                      ? Math.round((approvedModules / totalModules) * 100)
-                      : 0;
+  useEffect(() => {
+    localStorage.setItem('app_courses', JSON.stringify(courses));
+  }, [courses]);
 
-                  return (
-                    <li key={course.id}>
-                      <strong>{course.title}:</strong> {approvedModules} /{' '}
-                      {totalModules} Modules Approved ({percent}%)
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
 
-/* ==========================================================================
-   MAIN APP COMPONENT
-   ========================================================================== */
-
-export default function App() {
-  const [currentUser, setCurrentUser] = useState(null);
-  const [users, setUsers] = useState([]);
-  const [courses, setCourses] = useState([]);
-  const [view, setView] = useState('signin'); // 'signin', 'create', 'forgot', 'dashboard', 'course', 'lesson', 'studentProgress'
+  const [view, setView] = useState('dashboard');
+  const [authView, setAuthView] = useState('signin');
   const [theme, setTheme] = useState('dark');
   const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [activeLessonId, setActiveLessonId] = useState(null);
+  const [editingCourse, setEditingCourse] = useState(null);
 
-  // Apply theme class to document body
   useEffect(() => {
     document.body.className = theme === 'dark' ? 'dark-theme' : 'light-theme';
   }, [theme]);
 
+  const activeUser = authUser || localUser;
+
   /* --- Auth Handlers --- */
   const handleSignIn = (email, password) => {
-    const user = users.find(
-      (u) => u.email === email && u.password === password
-    );
+    const user = users.find((u) => u.email === email && u.password === password);
     if (user) {
-      setCurrentUser(user);
+      setLocalUser(user);
       setView('dashboard');
     } else {
       alert('Invalid email or password.');
     }
   };
 
-  const handleCreateAccount = (
-    email,
-    password,
-    role,
-    ownerKey,
-    profileData
-  ) => {
+  const handleCreateAccount = (email, password, role, ownerKey, profileData = {}) => {
+    const {
+      firstName = '',
+      lastName = '',
+      studentId = '',
+      securityQuestion = '',
+      securityAnswer = ''
+    } = profileData;
+
     if (users.some((u) => u.email === email)) {
       alert('User with this email already exists.');
       return;
     }
+
     const newUser = {
       id: Date.now().toString(),
       email,
       password,
-      role,
-      ...profileData
+      role: role || 'student',
+      ownerKey,
+      studentId,
+      firstName,
+      lastName, 
+      name: `${firstName} ${lastName}`.trim() || email.split('@')[0],
+      securityQuestion,
+      securityAnswer
     };
-    setUsers([...users, newUser]);
-    setCurrentUser(newUser);
+    setUsers((prev) => [...prev, newUser]);
+    setLocalUser(newUser);
     setView('dashboard');
   };
 
@@ -154,8 +139,7 @@ export default function App() {
     }
     if (
       users[userIndex].securityAnswer &&
-      users[userIndex].securityAnswer.toLowerCase() !==
-        securityAnswer.toLowerCase()
+      users[userIndex].securityAnswer.toLowerCase() !== securityAnswer.toLowerCase()
     ) {
       alert('Incorrect security answer.');
       return false;
@@ -164,69 +148,23 @@ export default function App() {
     updatedUsers[userIndex].password = newPassword;
     setUsers(updatedUsers);
     alert('Password updated successfully!');
-    setView('signin');
+    setAuthView('signin');
     return true;
   };
 
-  const markFeedbackAsRead = (courseId, moduleId, date) => {
-    // Logic for updating feedback status locally
-    setCourses((prevCourses) =>
-      prevCourses.map((c) => {
-        if (c.id !== courseId) return c;
-        return {
-          ...c,
-          modules: c.modules.map((m) => {
-            if (m.id !== moduleId) return m;
-            const userFb = m.feedback ? m.feedback[currentUser.id] : [];
-            return {
-              ...m,
-              feedback: {
-                ...m.feedback,
-                [currentUser.id]: userFb.map((f) =>
-                  f.date === date ? { ...f, read: true } : f
-                )
-              }
-            };
-          })
-        };
-      })
-    );
+  const handleLogout = () => {
+    setLocalUser(null);
+    if (contextLogout) {
+      contextLogout();
+    }
+    setAuthView('signin');
   };
 
-  const handleExportData = () => {
-    const dataStr =
-      'data:text/json;charset=utf-8,' +
-      encodeURIComponent(JSON.stringify({ users, courses }));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', 'lms_backup.json');
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
-  const handleImportData = (e) => {
-    const fileReader = new FileReader();
-    fileReader.readAsText(e.target.files[0], 'UTF-8');
-    fileReader.onload = (event) => {
-      try {
-        const parsed = JSON.parse(event.target.result);
-        if (parsed.users) setUsers(parsed.users);
-        if (parsed.courses) setCourses(parsed.courses);
-        alert('Data imported successfully!');
-      } catch (err) {
-        console.error(err);
-        alert('Invalid JSON file format.');
-      }
-    };
-  };
-
-  // Auth Guard
-  if (!currentUser) {
+  if (!activeUser) {
     return (
       <AuthScreen
-        view={view}
-        setView={setView}
+        view={authView}
+        setView={setAuthView}
         onSignIn={handleSignIn}
         onCreate={handleCreateAccount}
         onResetPassword={handleResetPassword}
@@ -236,209 +174,275 @@ export default function App() {
     );
   }
 
-  const isStaff = currentUser.role === 'admin' || currentUser.role === 'mentor';
-  const visibleCourses = courses;
+  const isStaff = ['instructor', 'ta', 'admin', 'mentor'].includes(activeUser.role);
+
+  const viewTitles = {
+    dashboard: 'Dashboard',
+    courses: 'Courses',
+    'course-management': 'Course Management',
+    progress: 'Progress',
+    reports: 'Reports & Analytics',
+    submissions: 'Submissions',
+    messages: 'Messages',
+    editor: 'Course Editor',
+    users: 'User Management',
+    settings: 'Account Settings',
+    lesson: 'Lesson Viewer'
+  };
+
+  const handleCourseSelection = (courseOrId) => {
+    const targetId = typeof courseOrId === 'object' ? courseOrId?.id : courseOrId;
+    const targetCourse = courses.find((c) => c.id === targetId);
+
+    setSelectedCourseId(targetId);
+
+    const firstLessonId =
+      targetCourse?.lessons?.[0]?.id ||
+      targetCourse?.modules?.[0]?.id ||
+      null;
+
+    setActiveLessonId(firstLessonId);
+    setView('lesson');
+  };
+
+  const handleDeleteCourse = async (course) => {
+    try {
+      await deleteCourse(course.id);
+      setCourses(prevCourses => prevCourses.filter(c => c.id !== course.id));
+    } catch (err) {
+      console.error('Failed to delete course and its submissions.', err);
+      alert('Could not delete course. Please check the console');
+    }
+  };
+
+  const selectedCourse = courses.find((c) => c.id === selectedCourseId) || courses[0] || null;
+  const selectedLesson =
+    selectedCourse?.lessons?.find((l) => l.id === activeLessonId) ||
+    selectedCourse?.lessons?.[0] ||
+    null;
 
   return (
     <div id='app-wrapper' className={theme}>
-      {/* SIDEBAR NAVIGATION */}
-      <aside id='sidebar'>
-        <div className='sidebar-header'>
-          <h3>Phoenix LMS</h3>
-          <p>
-            {currentUser.firstName} ({currentUser.role})
-          </p>
-        </div>
-        <nav>
-          <button onClick={() => setView('dashboard')}>Dashboard</button>
-          {isStaff && (
-            <button onClick={() => setView('studentProgress')}>
-              Student Progress
+      <div id='layout'>
+        <Sidebar
+          setView={setView}
+          currentView={view}
+          onExportBackup={() => exportData({ users, courses })}
+          onImportBackup={(file) => importData(file, setUsers, setCourses)}
+          courses={courses}
+          currentUser={activeUser}
+          onLogout={handleLogout}
+        />
+
+        <main id='content'>
+          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h1 className='pf-title bg-gradient-to-r from-orange-400 via-pink-500 to-purple-500 bg-clip-text text-transparent' style={{ margin: 0 }}>
+              {viewTitles[view] || view}
+            </h1>
+            <button
+              className='theme-toggle'
+              style={{ position: 'static' }}
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
             </button>
-          )}
-          <button
-            onClick={() => {
-              setCurrentUser(null);
-              setView('signin');
-            }}
-          >
-            Sign Out
-          </button>
-        </nav>
-        <div className='sidebar-footer'>
-          <button onClick={handleExportData}>Export Backup</button>
-          <label className='btn-file-input'>
-            Import Backup
-            <input
-              type='file'
-              accept='.json'
-              onChange={handleImportData}
-              style={{ display: 'none' }}
-            />
-          </label>
-        </div>
-      </aside>
+          </header>
 
-      {/* MAIN CONTENT AREA */}
-      <main id='main-content'>
-        <header style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <h1>
-            {view === 'dashboard'
-              ? 'Dashboard'
-              : view === 'lesson'
-                ? 'Lesson View'
-                : 'Student Progress'}
-          </h1>
-          <button
-            className='theme-toggle'
-            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          >
-            {theme === 'dark' ? '☀️' : '🌙'}
-          </button>
-        </header>
+          <div className='content-body'>
+            {view === 'dashboard' && (
+              <Dashboard
+                currentUser={activeUser}
+                courses={courses}
+                onUpdateCourses={setCourses}
+              />
+            )}
 
-        <div className='content-body'>
-          {view === 'dashboard' && (
-            <div>
-              {!isStaff && (
-                <>
-                  {/* FEEDBACK HISTORY SECTION */}
-                  <h2 style={{ marginTop: 40, color: '#f472b6' }}>
-                    Mentor Feedback Archive
-                  </h2>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '10px'
-                    }}
-                  >
-                    {getStudentFeedbackHistory(courses, currentUser).length ===
-                    0 ? (
-                      <p style={{ color: '#94e3b8' }}>
-                        No feedback history found yet.
-                      </p>
-                    ) : (
-                      getStudentFeedbackHistory(courses, currentUser).map(
-                        (item, idx) => (
-                          <div
-                            key={idx}
-                            className='course-box'
-                            style={{ borderLeft: '4px solid #f472b6' }}
-                          >
-                            <div
-                              style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                marginBottom: '5px'
-                              }}
-                            >
-                              <strong style={{ color: '#60a5fa' }}>
-                                {item.moduleTitle}
-                              </strong>
-                              <span style={{ fontSize: '0.8em', opacity: 0.7 }}>
-                                {new Date(item.date).toLocaleDateString()}
-                              </span>
-                            </div>
-                            <p style={{ margin: 0, fontStyle: 'italic' }}>
-                              "{item.feedbackText}"
-                            </p>
-                            <div
-                              style={{ marginTop: '5px', fontSize: '0.85em' }}
-                            >
-                              Status:{' '}
-                              <span
-                                style={{
-                                  color:
-                                    item.status === 'approved'
-                                      ? '#22c55e'
-                                      : '#f59e0b'
-                                }}
-                              >
-                                {item.status.toUpperCase()}
-                              </span>
-                            </div>
+            {view === 'courses' && (
+              <CourseList
+                courses={courses}
+                currentUser={activeUser}
+                users={users}
+                onEditCourse={(course) => {
+                  if (isStaff) {
+                    setEditingCourse(course);
+                    setView('course-management');
+                  }
+                }}
+                onDeleteCourse={handleDeleteCourse}
+                onApproveCourse={(courseOrId) => {
+                  const idToApprove = typeof courseOrId === 'object' ? courseOrId.id : courseOrId;
+                  setCourses((prev) =>
+                    prev.map((c) => (c.id === idToApprove ? { ...c, status: 'published' } : c))
+                  );
+                }}
+                onSelectCourse={handleCourseSelection}
+              />
+            )}
 
-                            <button
-                              className='btn-inline'
-                              style={{ fontSize: '0.75em', padding: '4px 8px' }}
-                              onClick={() => {
-                                markFeedbackAsRead(
-                                  item.courseId,
-                                  item.moduleId,
-                                  item.date
-                                );
-                                setSelectedCourseId(item.courseId);
-                                setActiveLessonId(item.lessonId);
-                                setView('lesson');
-                              }}
-                            >
-                              View Lesson
-                            </button>
-                          </div>
-                        )
-                      )
-                    )}
+            {view === 'course-management' && isStaff && (
+              <div className="course-management-container">
+                <div className="flex justify-between items-center mb-6">
+                  {!editingCourse && (
+                    <button
+                      onClick={() => {
+                        const newCourse = {
+                          id: `course_${Date.now()}`,
+                          title: 'Untitled New Course',
+                          description: '',
+                          status: 'draft',
+                          mentorKey: activeUser?.email || '',
+                          assignedStudentKeys: [],
+                          lessons: [
+                            {
+                              id: `lesson_${Date.now()}`,
+                              title: 'Module 1: Introduction',
+                              description: '',
+                              modules: []
+                            }
+                          ]
+                        };
+                        setEditingCourse(newCourse);
+                      }}
+                      className="btn-primary flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-orange-500 to-pink-500 text-white font-semibold"
+                    >
+                      <span>+</span> Create New Course
+                    </button>
+                  )}
+                </div>
+
+                {editingCourse ? (
+                  <div>
+                    <button
+                      onClick={() => setEditingCourse(null)}
+                      className="mb-4 text-sm text-gray-400 hover:text-white flex items-center gap-1"
+                    >
+                      ← Back to Course Management
+                    </button>
+
+                    <CourseEditor
+                      course={editingCourse}
+                      users={users}
+                      currentUser={activeUser}
+                      onSave={(updatedCourse) => {
+                        setCourses((prev) => {
+                          const exists = prev.some((c) => c.id === updatedCourse.id);
+                          if (exists) {
+                            return prev.map((c) => (c.id === updatedCourse.id ? updatedCourse : c));
+                          }
+                          return [...prev, updatedCourse];
+                        });
+                        setEditingCourse(null);
+                      }}
+                      onCancel={() => setEditingCourse(null)}
+                    />
                   </div>
-                </>
-              )}
-
-              {isStaff && (
-                <>
-                  <h2 style={{ marginTop: 0, color: '#f472b6' }}>
-                    Student Progress
-                  </h2>
-                  <p style={{ color: '#cbd5e1' }}>
-                    Progress is based on approved assignments (module unlocks).
-                  </p>
-
-                  <StudentProgressBoard
-                    courses={visibleCourses}
+                ) : (
+                  <CourseList
+                    courses={courses}
+                    currentUser={activeUser}
                     users={users}
+                    onEditCourse={(course) => setEditingCourse(course)}
+                    onDeleteCourse={(courseOrId) => {
+                      const idToDelete = typeof courseOrId === 'object' ? courseOrId.id : courseOrId;
+                      if (window.confirm('Are you sure you want to delete this course?')) {
+                        setCourses((prev) => prev.filter((c) => c.id !== idToDelete));
+                      }
+                    }}
+                    onApproveCourse={(courseOrId) => {
+                      const idToApprove = typeof courseOrId === 'object' ? courseOrId.id : courseOrId;
+                      setCourses((prev) =>
+                        prev.map((c) => (c.id === idToApprove ? { ...c, status: 'published' } : c))
+                      );
+                    }}
+                    onSelectCourse={handleCourseSelection}
                   />
-                </>
-              )}
-            </div>
-          )}
+                )}
+              </div>
+            )}
 
-          {/* LESSON VIEW */}
-          {view === 'lesson' && (
-            <div className='course-box'>
-              <h2>Selected Lesson</h2>
-              <p>
-                <strong>Course ID:</strong> {selectedCourseId || 'N/A'}
-              </p>
-              <p>
-                <strong>Lesson ID:</strong> {activeLessonId || 'N/A'}
-              </p>
-              <button className='btn' onClick={() => setView('dashboard')}>
-                Back to Dashboard
-              </button>
-            </div>
-          )}
+            {view === 'lesson' && (
+              <LessonView
+                key={`${selectedCourseId || 'no-course'}-${activeLessonId || 'no-lesson'}`}
+                courses={courses}
+                course={selectedCourse}
+                lesson={selectedLesson}
+                courseId={selectedCourseId}
+                lessonId={activeLessonId}
+                currentUser={activeUser}
+                setCourses={setCourses}
+                onBack={() => setView(isStaff ? 'course-management' : 'courses')}
+              />
+            )}
 
-          {/* STAFF PROGRESS BOARD (Mentor/Admin) */}
-          {view === 'studentProgress' && isStaff && (
-            <StudentProgressBoard courses={visibleCourses} users={users} />
-          )}
-        </div>
-      </main>
+            {view === 'submissions' && isStaff && (
+              <SubmissionsDashboard
+                courses={courses}
+                users={users}
+                setCourses={setCourses}
+                currentUser={activeUser} 
+              />
+            )}
+
+            {view === 'messages' && (
+              <Messages currentUser={activeUser} users={users} />
+            )}
+
+            {view === 'users' && activeUser.role === 'admin' && (
+              <UserManagement
+                currentUser={activeUser}
+                users={users}
+                onUserCreated={(existingUsers, email, password, role, studentId, securityQuestion, securityAnswer) => {
+                  const newUser = {
+                    id: Date.now().toString(),
+                    email,
+                    password,
+                    role: role || 'student',
+                    studentId,
+                    securityQuestion,
+                    securityAnswer
+                  };
+                  setUsers((prev) => [...prev, newUser]);
+                }}
+                onUserDeleted={(userIdOrEmail) => {
+                  setUsers((prev) => prev.filter((u) => u.id !== userIdOrEmail && u.email !== userIdOrEmail));
+                }}
+              />
+            )}
+
+            {view === 'progress' && (
+              <div>
+                <h2 className='section-subheading'>
+                  {isStaff ? 'Progress Tracking' : 'My Progress'}
+                </h2>
+                <StudentBoard courses={courses} users={users} currentUser={activeUser} />
+              </div>
+            )}
+
+            {view === 'reports' && isStaff && (
+              <div>
+                <h2 className='section-subheading'>Staff Reports & Overview</h2>
+                <StudentBoard courses={courses} users={users} currentUser={activeUser} />
+              </div>
+            )}
+
+            {view === 'settings' && (
+              <div>
+                <h2 className='section-subheading'>Account Settings</h2>
+                <div className="course-box" style={{ padding: '20px' }}>
+                  <p style={{ opacity: 0.8 }}>Logged in as: <strong>{activeUser?.email}</strong></p>
+                  <p style={{ opacity: 0.8 }}>Role: <strong style={{ textTransform: 'uppercase' }}>{activeUser?.role}</strong></p>
+                </div>
+              </div>
+            )}
+
+          </div>
+        </main>
+      </div>
     </div>
   );
 }
 
-/* ==========================================================================
-   AUTH SCREEN
-   ========================================================================== */
-function AuthScreen({
-  view,
-  setView,
-  onSignIn,
-  onCreate,
-  onResetPassword,
-  theme,
-  setTheme
-}) {
+function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme, setTheme }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -450,7 +454,8 @@ function AuthScreen({
   const [securityQuestion, setSecurityQuestion] = useState('');
   const [securityAnswer, setSecurityAnswer] = useState('');
 
-  const handleResetSubmit = () => {
+  const handleResetSubmit = (e) => {
+    e.preventDefault();
     if (password !== confirmPassword) {
       alert('Passwords do not match!');
       return;
@@ -464,10 +469,27 @@ function AuthScreen({
     }
   };
 
+  const handleSignInSubmit = (e) => {
+    e.preventDefault();
+    onSignIn(email, password);
+  };
+
+  const handleCreateSubmit = (e) => {
+    e.preventDefault();
+    onCreate(email, password, role, ownerKey, {
+      firstName,
+      lastName,
+      studentId,
+      securityQuestion,
+      securityAnswer
+    });
+  };
+
   return (
     <div id='auth-container'>
       <div id='auth-card'>
         <button
+          type='button'
           className='theme-toggle'
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
         >
@@ -482,80 +504,117 @@ function AuthScreen({
         <h1 className='app-title'>Phoenix Fire Technical Academy</h1>
 
         {view === 'signin' && (
-          <>
+          <form onSubmit={handleSignInSubmit}>
             <h2>Sign In</h2>
-
             <input
               className='input-wide'
               placeholder='Email'
               type='email'
+              autoComplete='email'
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-
             <input
               className='input-wide'
               type='password'
               placeholder='Password'
+              autoComplete='current-password'
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-
-            <button className='btn' onClick={() => onSignIn(email, password)}>
+            <button type='submit' className='btn'>
               Sign In
             </button>
-
-            <button className='btn-secondary' onClick={() => setView('forgot')}>
+            <button type='button' className='btn-secondary' onClick={() => setView('forgot')}>
               Forgot Password?
             </button>
-
-            <button className='btn-secondary' onClick={() => setView('create')}>
+            <button type='button' className='btn-secondary' onClick={() => setView('create')}>
               Create Account
             </button>
-          </>
+          </form>
+        )}
+
+        {view === 'forgot' && (
+          <form onSubmit={handleResetSubmit}>
+            <h2>Reset Password</h2>
+            <input
+              className='input-wide'
+              placeholder='Email'
+              type='email'
+              autoComplete='email'
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <input
+              className='input-wide'
+              placeholder='Security Answer'
+              value={securityAnswer}
+              onChange={(e) => setSecurityAnswer(e.target.value)}
+            />
+            <input
+              className='input-wide'
+              type='password'
+              placeholder='New Password'
+              autoComplete='new-password'
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+            <input
+              className='input-wide'
+              type='password'
+              placeholder='Confirm New Password'
+              autoComplete='new-password'
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+            <button type='submit' className='btn'>
+              Reset Password
+            </button>
+            <button type='button' className='btn-secondary' onClick={() => setView('signin')}>
+              Back to Sign In
+            </button>
+          </form>
         )}
 
         {view === 'create' && (
-          <>
+          <form onSubmit={handleCreateSubmit}>
             <h2>Create Account</h2>
-
             <input
               className='input-wide'
               placeholder='First Name'
+              autoComplete='given-name'
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
             />
-
             <input
               className='input-wide'
               placeholder='Last Name'
+              autoComplete='family-name'
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
             />
-
             <input
               className='input-wide'
               placeholder='Student ID'
               value={studentId}
               onChange={(e) => setStudentId(e.target.value)}
             />
-
             <input
               className='input-wide'
               placeholder='Email'
               type='email'
+              autoComplete='email'
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-
             <input
               className='input-wide'
               type='password'
               placeholder='Password'
+              autoComplete='new-password'
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-
             <select
               className='input-wide'
               value={securityQuestion}
@@ -572,105 +631,36 @@ function AuthScreen({
                 What was your first car?
               </option>
             </select>
-
             <input
               className='input-wide'
               placeholder='Security Answer'
               value={securityAnswer}
               onChange={(e) => setSecurityAnswer(e.target.value)}
             />
-
             <select
               className='input-wide'
               value={role}
               onChange={(e) => setRole(e.target.value)}
             >
               <option value='student'>Student</option>
+              <option value='ta'>TA</option>
+              <option value='instructor'>Instructor</option>
               <option value='mentor'>Mentor</option>
               <option value='admin'>Admin</option>
             </select>
-
             <input
               className='input-wide'
               placeholder='Owner Key'
               value={ownerKey}
               onChange={(e) => setOwnerKey(e.target.value)}
             />
-
-            <button
-              className='btn'
-              onClick={() =>
-                onCreate(email, password, role, ownerKey, {
-                  firstName,
-                  lastName,
-                  studentId,
-                  securityQuestion,
-                  securityAnswer
-                })
-              }
-            >
+            <button type='submit' className='btn'>
               Create Account
             </button>
-
-            <button className='btn-secondary' onClick={() => setView('signin')}>
+            <button type='button' className='btn-secondary' onClick={() => setView('signin')}>
               Back
             </button>
-          </>
-        )}
-
-        {/* FORGOT PASSWORD */}
-        {view === 'forgot' && (
-          <>
-            <h2>Reset Password</h2>
-            <p
-              style={{
-                fontSize: '0.85em',
-                color: '#cbd5e1',
-                marginBottom: '10px'
-              }}
-            >
-              Enter your email to reset your password.
-            </p>
-
-            <input
-              className='input-wide'
-              placeholder='Account Email'
-              type='email'
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-
-            <input
-              className='input-wide'
-              placeholder='Security Answer'
-              value={securityAnswer}
-              onChange={(e) => setSecurityAnswer(e.target.value)}
-            />
-
-            <input
-              className='input-wide'
-              type='password'
-              placeholder='New Password'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-
-            <input
-              className='input-wide'
-              type='password'
-              placeholder='Confirm New Password'
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
-
-            <button className='btn' onClick={handleResetSubmit}>
-              Update Password
-            </button>
-
-            <button className='btn-secondary' onClick={() => setView('signin')}>
-              Back to Sign In
-            </button>
-          </>
+          </form>
         )}
       </div>
     </div>

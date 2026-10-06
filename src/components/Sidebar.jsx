@@ -1,227 +1,173 @@
-// src/components/Sidebar.jsx
-import { useRef } from 'react';
-import { canMentorSeeCourse } from '../utils/permissions';
-import phoenixLogo from '../assets/Images/phoenix.jpg';
-import { useAuth } from '../context/AuthContext'; // 1. Import useAuth hook
+import React, { useState } from 'react';
 
-export default function Sidebar({
-  isStudent,
-  isStaff,
+const Sidebar = ({
   setView,
+  currentView,
   onExportBackup,
   onImportBackup,
-  courses,
-  revisionCount = 0
-}) {
-  const { currentUser, logout } = useAuth(); // 2. Grab auth values directly from context
-  const fileRef = useRef(null);
+  courses = [],
+  currentUser,
+  onLogout
+}) => {
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
-  const isAdmin = currentUser?.role === 'admin';
-  const userEmailOrName = currentUser?.firstName
-    ? `${currentUser.firstName} ${currentUser.lastName}`.trim()
-    : (currentUser?.email ?? 'User');
+  const role = currentUser?.role || 'student';
+  const isStaff = ['instructor', 'ta', 'mentor', 'admin'].includes(role);
+  const isAdmin = role === 'admin';
 
-  const canSeeSubmissions = (() => {
-    const list = Array.isArray(courses) ? courses : [];
-    for (const course of list) {
-      if (!canMentorSeeCourse(course, currentUser)) continue;
-      for (const lesson of course.lessons || []) {
-        for (const mod of lesson.modules || []) {
-          const subs = mod?.assignment?.submissions || [];
-          if (subs.length > 0) return true;
-        }
-      }
-    }
-    return false;
-  })();
+  const courseCount = courses?.length || 0;
 
   return (
-    <aside id='sidebar'>
-      {/* HEADER */}
-      <div className='sidebar-header'>
+    <aside id="sidebar" className={isCollapsed ? 'collapsed' : ''}>
+      {/* HEADER WITH LOGO & COLLAPSE TOGGLE */}
+      <div className="sidebar-header">
         <img
-          src={phoenixLogo}
-          alt='Phoenix Fire Technical Academy'
-          className='sidebar-logo-img'
+          src="/src/assets/Images/phoenix.jpg"
+          alt="Academy Logo"
+          className="sidebar-logo-img"
         />
-        <div className='sidebar-logo-text'>
-          Phoenix Fire
-          <br />
-          Technical Academy
-        </div>
-      </div>
 
-      {/* USER INFO */}
-      <div className='sidebar-user'>
-        <div className='sidebar-username'>{userEmailOrName}</div>
-        <div className='sidebar-role'>{currentUser?.role || 'Student'}</div>
-      </div>
-
-      {/* SHARED NAVIGATION */}
-      <button
-        type='button'
-        className='sidebar-btn'
-        onClick={() => setView('dashboard')}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px'
-        }}
-      >
-        <span>Dashboard</span>
-        {revisionCount > 0 && (
-          <span
-            style={{
-              background: 'var(--pf-fire, #e63946)',
-              color: 'white',
-              fontSize: '11px',
-              minWidth: '20px',
-              height: '20px',
-              borderRadius: '50%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 'bold',
-              boxShadow: '0 0 10px var(--pf-fire, #e63946)',
-              padding: '2px'
-            }}
-          >
-            {revisionCount}
-          </span>
+        {!isCollapsed && (
+          <div className="sidebar-logo-text">
+            Phoenix Fire<br />Technical Academy
+          </div>
         )}
-      </button>
 
-      <button
-        type='button'
-        className='sidebar-btn'
-        onClick={() => setView('courses')}
-      >
-        Courses
-      </button>
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => setIsCollapsed(!isCollapsed)}
+          title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          style={{ position: 'static', marginLeft: 'auto' }}
+        >
+          {isCollapsed ? '❯' : '❮'}
+        </button>
+      </div>
 
-      <button
-        type='button'
-        className='sidebar-btn'
-        onClick={() => setView('messages')}
-      >
-        Messages
-      </button>
-
-      {/* STUDENT NAVIGATION */}
-      {isStudent && (
-        <>
-          <button
-            type='button'
-            className='sidebar-btn'
-            onClick={() => setView('progress')}
-          >
-            My Progress
-          </button>
-          <button
-            type='button'
-            className='sidebar-btn'
-            onClick={() => setView('settings')}
-          >
-            Settings
-          </button>
-        </>
+      {/* USER PROFILE INFO BOX */}
+      {!isCollapsed && (
+        <div className="sidebar-user">
+          <span className="sidebar-username">
+            {currentUser?.email || currentUser?.firstName || 'User'}
+          </span>
+          <span className="sidebar-role">{role.toUpperCase()}</span>
+        </div>
       )}
 
-      {/* STAFF NAVIGATION */}
-      {isStaff && (
-        <>
-          <button
-            type='button'
-            className='sidebar-btn'
-            onClick={() => setView('progress')}
-          >
-            Progress
-          </button>
-          <button
-            type='button'
-            className='sidebar-btn'
-            onClick={() => setView('reports')}
-          >
-            Reports
-          </button>
+      {/* NAVIGATION LINKS */}
+      <nav className="sidebar-nav">
+        <button
+          type="button"
+          className={`sidebar-btn ${currentView === 'dashboard' ? 'active' : ''}`}
+          onClick={() => setView('dashboard')}
+          title="Dashboard"
+        >
+          <span className="nav-icon">📊</span>
+          {!isCollapsed && <span className="nav-label">Dashboard</span>}
+        </button>
 
-          {canSeeSubmissions && (
-            <button
-              type='button'
-              className='sidebar-btn'
-              onClick={() => setView('submissions')}
-            >
-              Submissions
-            </button>
-          )}
-
+        {/* COURSE MANAGEMENT (STAFF ONLY) */}
+        {isStaff && (
           <button
-            type='button'
-            className='sidebar-btn'
-            onClick={() => setView('studentProgress')}
+            type="button"
+            className={`sidebar-btn ${
+              currentView === 'course-management' || currentView === 'editor' ? 'active' : ''
+            }`}
+            onClick={() => setView('course-management')}
+            title="Course Management"
           >
-            Student Progress
+            <span className="nav-icon">🛠️</span>
+            {!isCollapsed && <span className="nav-label">Course Management</span>}
           </button>
-          <button
-            type='button'
-            className='sidebar-btn'
-            onClick={() => setView('settings')}
-          >
-            Settings
-          </button>
-        </>
-      )}
+        )}
 
-      {/* ADMIN NAVIGATION & BACKUPS */}
-      {isAdmin && (
-        <>
+        <button
+          type="button"
+          className={`sidebar-btn ${currentView === 'courses' ? 'active' : ''}`}
+          onClick={() => setView('courses')}
+          title={courseCount > 0 ? `Courses (${courseCount})` : 'Courses'}
+        >
+          <span className="nav-icon">📚</span>
+          {!isCollapsed && <span className="nav-label">Courses</span>}
+        </button>
+
+        <button
+          type="button"
+          className={`sidebar-btn ${currentView === 'messages' ? 'active' : ''}`}
+          onClick={() => setView('messages')}
+          title="Messages"
+        >
+          <span className="nav-icon">💬</span>
+          {!isCollapsed && <span className="nav-label">Messages</span>}
+        </button>
+
+        <button
+          type="button"
+          className={`sidebar-btn ${currentView === 'progress' ? 'active' : ''}`}
+          onClick={() => setView('progress')}
+          title="My Progress"
+        >
+          <span className="nav-icon">📈</span>
+          {!isCollapsed && <span className="nav-label">My Progress</span>}
+        </button>
+
+        <button
+          type="button"
+          className={`sidebar-btn ${currentView === 'settings' ? 'active' : ''}`}
+          onClick={() => setView('settings')}
+          title="Settings"
+        >
+          <span className="nav-icon">⚙️</span>
+          {!isCollapsed && <span className="nav-label">Settings</span>}
+        </button>
+
+        {isAdmin && (
           <button
-            type='button'
-            className='sidebar-btn'
+            type="button"
+            className={`sidebar-btn ${currentView === 'users' ? 'active' : ''}`}
             onClick={() => setView('users')}
+            title="User Management"
           >
-            Users
+            <span className="nav-icon">👥</span>
+            {!isCollapsed && <span className="nav-label">User Management</span>}
           </button>
+        )}
 
-          <button
-            className='sidebar-btn'
-            type='button'
-            onClick={() => onExportBackup?.()}
-          >
-            Export Backup
-          </button>
+        {/* ADMIN BACKUP CONTROLS */}
+        {isAdmin && !isCollapsed && (
+          <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <button
+              type="button"
+              className="sidebar-outline-btn"
+              onClick={onExportBackup}
+            >
+              Export JSON Backup
+            </button>
+            <label className="sidebar-outline-btn" style={{ cursor: 'pointer', textAlign: 'center' }}>
+              Import JSON Backup
+              <input
+                type="file"
+                accept=".json"
+                onChange={(e) => e.target.files?.[0] && onImportBackup(e.target.files[0])}
+                style={{ display: 'none' }}
+              />
+            </label>
+          </div>
+        )}
 
-          <button
-            className='sidebar-btn'
-            type='button'
-            onClick={() => fileRef.current?.click()}
-          >
-            Import Backup
-          </button>
-
-          <input
-            ref={fileRef}
-            type='file'
-            accept='application/json'
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) onImportBackup?.(file);
-              e.target.value = '';
-            }}
-          />
-        </>
-      )}
-
-      {/* LOGOUT */}
-      <button
-        type='button'
-        className='sidebar-btn sidebar-logout'
-        onClick={logout} // 3. Wire up the logout function directly
-      >
-        Logout
-      </button>
+        {/* LOGOUT BUTTON */}
+        <button
+          type="button"
+          className="sidebar-btn sidebar-logout"
+          onClick={onLogout}
+          title="Sign Out"
+        >
+          <span className="nav-icon">🚪</span>
+          {!isCollapsed && <span className="nav-label">Sign Out</span>}
+        </button>
+      </nav>
     </aside>
   );
-}
+};
+
+export default Sidebar;

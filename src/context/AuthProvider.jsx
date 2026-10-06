@@ -1,7 +1,7 @@
 // src/context/AuthProvider.jsx
 import React, { useState, useEffect } from 'react';
 import { AuthContext } from './AuthContext';
-import { supabase } from '../supabaseClient';
+import { supabase } from '../utils/supabaseClient';
 
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
