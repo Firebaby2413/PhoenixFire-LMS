@@ -1,13 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { isStatusPassing, isStatusFailing } from '../utils/progress';
-import { fetchAllSubmissions, gradeSubmission } from '../utils/storage';
+import { fetchAllSubmissions, gradeSubmission, applyLocalGrade } from '../utils/storage';
+import {
+  getDisplayName,
+  findStoredUser,
+  pushUserNotification,
+  readUserNotifications,
+  markNotificationsRead
+} from '../utils/academySettings';
 
 export default function Dashboard(props) {
   const [courses, setCourses] = useState(props.courses || []);
   const user = props.user || props.currentUser || props.userObj || props.auth?.user || {};
   const onUpdateCourses = props.onUpdateCourses;
   const propSubmissions = props.submissions || [];
-
+  const directoryUsers = props.users || [];
+  const [inbox, setInbox] = useState(() => readUserNotifications(user));
+  const [openStudentKeys, setOpenStudentKeys] = useState({});
   const [selectedCourseId, setSelectedCourseId] = useState('ALL');
   const [feedbackInputs, setFeedbackInputs] = useState({});
   const [videoInputs, setVideoInputs] = useState({});
@@ -70,6 +79,10 @@ export default function Dashboard(props) {
     loadData();
   }, [loadData, selectedCourseId]);
 
+  useEffect(() => {
+    setInbox(readUserNotifications(user));
+  }, [user?.id, user?.email]);
+
   const matchesStudent = (sub) => {
     if (!sub) return false;
     if (!isStudent) return true;
@@ -116,6 +129,7 @@ export default function Dashboard(props) {
 
     const addIfValid = (sub, defaultTitle = 'Assignment Submission') => {
       if (!sub) return;
+      sub = applyLocalGrade(sub);
       if (isStudent && !matchesStudent(sub)) return;
 
       const rawCourseId = sub.courseId || sub.course_id || sub.courseID;
@@ -227,6 +241,29 @@ export default function Dashboard(props) {
 
   const activeSubmissions = extractSubmissions();
 
+  const studentThreads = (() => {
+    const latestByThread = new Map();
+    activeSubmissions.forEach((sub) => {
+      const studentKey = String(sub.student_id || sub.studentEmail || sub.student || '').toLowerCase();
+      const modKey = String(sub.moduleId || sub.module_id || '');
+      const threadId = `${studentKey}::${modKey}`;
+      const prev = latestByThread.get(threadId);
+      const t = new Date(sub.created_at || sub.submittedAt || 0).getTime();
+      const pt = prev ? new Date(prev.created_at || prev.submittedAt || 0).getTime() : -1;
+      if (!prev || t >= pt) latestByThread.set(threadId, sub);
+    });
+    const byStudent = {};
+    [...latestByThread.values()].forEach((sub) => {
+      const person = findStoredUser(directoryUsers, sub) || sub;
+      const key = String(person.id || person.email || sub.student_id || 'unknown');
+      if (!byStudent[key]) {
+        byStudent[key] =  { key, name: getDisplayName(person), subs: [] };
+      }
+      byStudent[key].subs.push(sub);
+    });
+    return Object.values(byStudent).sort((a, b) => a.name.localeCompare(b.name));
+  })();
+
   const handleGrade = async (targetModuleId, targetSub, newStatus) => {
     const subId = targetSub.id || targetSub.uniqueSubId;
     const feedbackText = feedbackInputs[subId] !== undefined ? feedbackInputs[subId] : targetSub.feedback || '';
@@ -235,11 +272,31 @@ export default function Dashboard(props) {
     setIsUpdating((prev) => ({ ...prev, [subId]: true }));
 
     try {
-      if (typeof gradeSubmission === 'function' && targetSub.id && !String(targetSub.id).includes('c-')) {
-        await gradeSubmission(targetSub.id, newStatus, feedbackText, videoUrl);
+      let saved = null;
+      const isFakeId = !targetSub.id || String(targetSub.id).startsWith('c-');
+      if (typeof gradeSubmission === 'function' && !isFakeId) {
+        saved = await gradeSubmission(targetSub.id, newStatus, feedbackText, videoUrl);
       }
 
-      const isPassed = isStatusPassing(newStatus);
+      const appliedStatus = saved?.status || newStatus;
+      const isPassed = isStatusPassing(appliedStatus);
+
+      setRemoteSubmissions((prev) =>
+        prev.map((s) =>
+          String(s.id) === String(targetSub.id)
+            ? {
+                ...s,
+                ...(saved || {}),
+                status: appliedStatus,
+                feedback: saved?.feedback || feedbackText,
+                feedbackText: saved?.feedbackText || feedbackText,
+                feedback_text: saved?.feedback_text || feedbackText,
+                feedbackVideoUrl: saved?.feedbackVideoUrl || videoUrl,
+                feedback_video_url: saved?.feedback_video_url || videoUrl
+              }
+            : s
+        )
+      );
 
       if (typeof onUpdateCourses === 'function') {
         const updatedCourses = courses.map((course) => {
@@ -273,9 +330,22 @@ export default function Dashboard(props) {
         onUpdateCourses(updatedCourses);
       }
 
+      const studentUser = findStoredUser(directoryUsers, targetSub);
+      if (studentUser) {
+        pushUserNotification(
+          studentUser,
+          isPassed ? 'passed' : 'revision',
+          isPassed
+            ? 'Your assignment was marked passed'
+            : 'Your assignment needs revision.'
+        );
+      }
+
       await loadData();
+      alert(isPassed ? 'Assignment marked as Passed.' : 'Revision requested.');
     } catch (err) {
       console.error('Grading error:', err);
+      alert(`Failed to save grade: ${err.message || 'unknown error'}`);
     } finally {
       setIsUpdating((prev) => ({ ...prev, [subId]: false }));
     }
@@ -334,6 +404,26 @@ export default function Dashboard(props) {
           </select>
         </div>
       </div>
+      
+      {inbox.filter((n) => !n.read).length > 0 && (
+        <div className='mb-6 p-4 rounded-xl border border-pink-500/30 bg-slate-900'>
+          <div className='flex justify-between items-center mb-2'>
+            <h3 className='text-sm font-semibold text-pink-300'>Notifications</h3>
+            <button
+              type='button'
+              className='text-xs text-gray-300 underline'
+              onClick={() => setInbox(markNotificationsRead(user))}
+            >
+              Mark all read
+            </button>
+          </div>
+          {inbox.filter((n) => !n.read).map((n) => (
+            <p key={n.id} className='text-sm text-gray-200 m-0 mb-1'>
+              {n.message}
+            </p>
+          ))}
+        </div>
+      )}
 
       <main className="space-y-6">
         <section className="bg-slate-900/85 backdrop-blur-md p-5 rounded-xl shadow-lg border border-slate-800">
@@ -344,8 +434,44 @@ export default function Dashboard(props) {
           {activeSubmissions.length === 0 ? (
             <p className="text-gray-400 italic py-4">No submissions found.</p>
           ) : (
-            <div className="space-y-4">
-              {activeSubmissions.map((sub) => {
+            <div className="space-y-3">
+              {studentThreads.map((thread) => {
+                const pendingCount = thread.subs.filter((s) => {
+                  const st = s.status || 'pending';
+                  return !isStatusPassing(st) && !isStatusFailing(st);
+                }).length;
+                const isOpen = !!openStudentKeys[thread.key];
+                return (
+                  <div key={thread.key} className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenStudentKeys((prev) => ({ ...prev, [thread.key]: !prev[thread.key] }))
+                      }
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '12px',
+                        padding: '12px 16px',
+                        textAlign: 'left',
+                        background: '#020617',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#f8fafc'
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>{thread.name}</span>
+                      <span style={{ fontSize: '12px', color: '#9ca3af', whiteSpace: 'nowrap' }}>
+                        {thread.subs.length} assignment{thread.subs.length === 1 ? '' : 's'}
+                        {pendingCount ? ` · ${pendingCount} pending` : ''}
+                        {'  '}{isOpen ? '▲' : '▼'}
+                      </span>
+                    </button>
+                    {isOpen && (
+                      <div className="space-y-4 p-4 pt-0">
+              {thread.subs.map((sub) => {
                 const subId = sub.uniqueSubId || sub.id;
                 const status = sub.status || 'pending';
                 const isPassed = isStatusPassing(status);
@@ -371,7 +497,7 @@ export default function Dashboard(props) {
                           )}
                         </div>
                         <p className="text-xs text-gray-400 mt-1">
-                          Student: <span className="text-gray-300">{sub.studentEmail || sub.student_email || sub.student || 'User'}</span>
+                          Student: <span className="text-gray-300">{getDisplayName(findStoredUser(directoryUsers, sub) || sub)}</span>
                         </p>
                         {repoUrl && (
                           <div className="mt-2 text-xs flex items-center gap-1.5 flex-wrap">
@@ -459,7 +585,7 @@ export default function Dashboard(props) {
                         <div className="flex gap-2.5 justify-end">
                           <button
                             disabled={isSubUpdating}
-                            onClick={() => handleGrade(sub.moduleId, sub, 'needs_revision')}
+                            onClick={() => handleGrade(sub.moduleId, sub, 'fail')}
                             style={{
                               backgroundColor: 'rgba(220, 38, 38, 0.8)',
                               color: '#ffffff',
@@ -476,7 +602,7 @@ export default function Dashboard(props) {
                           </button>
                           <button
                             disabled={isSubUpdating}
-                            onClick={() => handleGrade(sub.moduleId, sub, 'passed')}
+                            onClick={() => handleGrade(sub.moduleId, sub, 'pass')}
                             style={{
                               background: 'linear-gradient(to right, #f97316, #ec4899, #9333ea)', 
                               color: '#ffffff',
@@ -492,6 +618,11 @@ export default function Dashboard(props) {
                             {isSubUpdating ? 'Saving...' : 'Approve / Pass'}
                           </button>
                         </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
                       </div>
                     )}
                   </div>

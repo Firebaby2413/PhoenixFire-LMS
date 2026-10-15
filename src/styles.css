@@ -766,6 +766,10 @@ body.light-theme .module-card,
 
 .course-progress-fill {
   height: 100%;
+  display: block;
+  background: linear-gradient(to right, #f97316, #ec4899);
+  border-radius: 999px;
+  transition: width 0.3s ease;
 }
 
 /* Markdown Rendering */

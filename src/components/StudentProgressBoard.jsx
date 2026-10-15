@@ -1,5 +1,8 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
-import { supabase } from '../utils/storage';
+import { supabase, fetchAllSubmissions } from '../utils/storage';
+import { isReadingModule } from '../utils/moduleTypes';
+import { calculateCourseProgressDetailed } from '../utils/progress';
+import { getDisplayName } from '../utils/academySettings';
 import '../styles.css';
 
 const isSubmissionPassed = (status) => {
@@ -21,14 +24,11 @@ export default function StudentProgressBoard({ courses = [], users = [], current
 
   const loadSubmissions = useCallback(async () => {
     setLoadingSubmissions(true);
-    const { data, error } = await supabase
-      .from('submissions')
-      .select('id, student_id, user_id, module_id, status, submission_url, url, feedback_video_url, feedback_text');
-
-    if (error) {
+    try {
+      const rows = await fetchAllSubmissions();
+      setSubmissions(Array.isArray(rows) ? rows : []);
+    } catch (error) {
       console.error('Error loading submissions:', error);
-    } else {
-      setSubmissions(data || []);
     }
     setLoadingSubmissions(false);
   }, []);
@@ -58,7 +58,13 @@ export default function StudentProgressBoard({ courses = [], users = [], current
 
       studentKeys.forEach(sKey => {
         modKeys.forEach(mKey => {
-          map.set(`${sKey}_${mKey}`, s);
+          const key = `${sKey}_${mKey}`;
+          const prev = map.get(key);
+          const prevTime = prev ? new Date(prev.created_at || prev.submittedAt || 0).getTime() : -1;
+          const nextTime = new Date(s.created_at || s.submittedAt || 0).getTime();
+          if (!prev || nextTime >= prevTime) {
+            map.set(key, s);
+          }
         });
       });
     });
@@ -155,18 +161,20 @@ export default function StudentProgressBoard({ courses = [], users = [], current
           marginBottom: 16
         }}
       >
-        <h2 className='pf-title' style={{ margin: 0 }}>
-          {isStudentView ? 'My Progress' : 'Student Progress'}
-          {isAdminOrMentor} && <span style={{ fontSize: '12px', marginLeft: '8px', opacity: 0.7 }}>(Staff View)</span>
-        </h2>
+        
         {!isStudentView && (
-          <button
-            className='btn-secondary btn-inline'
-            type='button'
-            onClick={toggleAll}
-          >
-            {areAllExpanded ? 'Collapse All Details' : 'Expand All Details'}
-          </button>
+          <>
+            <h2 className='pf-title' style={{ margin: 0 }}>
+              Student Progress
+            </h2>
+            <button
+              className='btn-secondary btn-inline'
+              type='button'
+              onClick={toggleAll}
+            >
+              {areAllExpanded ? 'Collapse All Details' : 'Expand All Details'}
+            </button>
+          </>
         )}
       </div>
 
@@ -187,38 +195,12 @@ export default function StudentProgressBoard({ courses = [], users = [], current
             {displayedStudents.map((student) => {
               const rawStudentId = student.id || student.studentId || student.email;
               const studentKey = String(rawStudentId).trim().toLowerCase();
-              let totalModules = 0;
-              let completedModules = 0;
-              const totalLessons = (course.lessons || []).length;
-              let completedLessons = 0;
-
-              (course.lessons || []).forEach((lesson) => {
-                const modules = lesson.modules || [];
-                let lessonModulesPassed = 0;
-
-                modules.forEach((mod) => {
-                  totalModules++;
-                  const sub = submissionLookup.get(`${studentKey}_${String(mod.id).trim()}`);
-                  const isReading = mod.type === 'reading' || mod.requires_submission === false || mod.is_reading === true;
-                  
-                  const isCompleted = isReading 
-                    ? (sub ? isSubmissionPassed(sub.status) : true) 
-                    : (sub && isSubmissionPassed(sub.status));
-
-                  if (isCompleted) {
-                    completedModules++;
-                    lessonModulesPassed++;
-                  }
-                });
-
-                if (modules.length > 0 && lessonModulesPassed === modules.length) {
-                  completedLessons++;
-                }
-              });
-
-              const percent = totalModules > 0
-                ? Math.round((completedModules / totalModules) * 100)
-                : 0;
+              const progress = calculateCourseProgressDetailed(course, student, submissions);
+              const percent = progress.percentage;
+              const totalModules = progress.totalSteps || progress.totalCount;
+              const completedModules = progress.completedSteps || progress.completedCount;
+              const totalLessons = progress.totalLessons || (course.lessons || []).length;
+              const completedLessons = progress.completedLessons || 0;
 
               const accordionKey = `${course.id}_${studentKey}`;
               const showDetails = !!openMap[accordionKey];
@@ -243,7 +225,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                   >
                     <div>
                       <strong>
-                        {student.firstName || student.name || 'Student'} {student.lastName || ''}
+                        {getDisplayName(student)}
                       </strong>
                       <div style={{ opacity: 0.85, fontSize: 12, marginTop: 2 }}>
                         {student.email || studentKey}
@@ -321,7 +303,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                               ) : (
                                 modules.map((mod) => {
                                   const sub = submissionLookup.get(`${studentKey}_${String(mod.id).trim()}`);
-                                  const isReading = mod.type === 'reading' || mod.requires_submission === false || mod.is_reading === true;
+                                  const isReading = isReadingModule(mod);
                                   const isPassed = isSubmissionPassed(sub?.status);
 
                                   let displayStatus = 'Not Submitted';
@@ -334,8 +316,8 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                                     if (isPassed) {
                                       displayStatus = 'Passed';
                                       statusColor = '#4caf50';
-                                    } else if (String(sub.status).toLowerCase() === 'fail') {
-                                      displayStatus = 'Fail';
+                                    } else if (['fail', 'failed', 'needs_revision'].includes(String(sub.status).toLowerCase())) {
+                                      displayStatus = 'Needs Revision';
                                       statusColor = '#f44336';
                                     } else {
                                       displayStatus = sub.status || 'Pending';

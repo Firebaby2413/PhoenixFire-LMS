@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-
+import { getDisplayName, pushUserNotification } from '../utils/academySettings';
 const STORAGE_KEY = "phoenix_lms_messages";
 
 export default function Messages({ currentUser = {}, users = [] }) {
@@ -75,6 +75,11 @@ export default function Messages({ currentUser = {}, users = [] }) {
     };
     setLocalMessages((prev) => [...prev, newMessage]);
     setMsgText("");
+    pushUserNotification(
+      selectedContact,
+      'message',
+      `New message from ${getDisplayName(currentUser)}`
+    );
   };
 
   return (
@@ -182,7 +187,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
                     }}
                   >
                     <div style={{ fontWeight: "bold", fontSize: "0.9rem", color: "inherit" }}>
-                      {c.firstName || c.lastName ? `${c.firstName || ''} ${c.lastName || ''}`.trim() : c.email}
+                      {getDisplayName(c)}
                     </div>
                     <div style={{ fontSize: "11px", opacity: 0.7, textTransform: "uppercase", marginTop: "2px", color: "inherit" }}>
                       {c.role}
@@ -200,7 +205,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
             <>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
                 <h3 style={{ margin: 0, fontSize: "1.1rem" }}>
-                  Chatting with {selectedContact.firstName || selectedContact.email}
+                  Chatting with {getDisplayName(selectedContact)}
                 </h3>
                 {isStaff && (
                   <span

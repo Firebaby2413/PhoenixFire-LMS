@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import {getDisplayName } from '../utils/academySettings';
 
 const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated, onUserDeleted }) => {
   const [editingUserId, setEditingUserId] = useState(null);
@@ -17,7 +18,8 @@ const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated,
     zipCode: '',
     country: 'USA',
     emergencyContactName: '',
-    emergencyContactPhone: ''
+    emergencyContactPhone: '',
+    accessKey: ''
   });
 
   const userRole = currentUser?.role?.toLowerCase() || '';
@@ -47,7 +49,8 @@ const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated,
       zipCode: user.zipCode || '',
       country: user.country || 'USA',
       emergencyContactName: user.emergencyContactName || '',
-      emergencyContactPhone: user.emergencyContactPhone || ''
+      emergencyContactPhone: user.emergencyContactPhone || '',
+      accessKey: ''
     });
 
     // Smooth scroll up to form when editing
@@ -75,7 +78,8 @@ const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated,
       zipCode: '',
       country: 'USA',
       emergencyContactName: '',
-      emergencyContactPhone: ''
+      emergencyContactPhone: '',
+      accessKey: ''
     });
   };
 
@@ -229,6 +233,24 @@ const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated,
               required={!editingUserId}
             />
           </div>
+
+          {!editingUserId && (
+            <div className='form-field'>
+              <label className='form-label'>
+                {formData.role === 'admin' ? 'Owner Key' : 'Enrollment Key'}{' '}
+                <span className='required-star'>*</span>
+              </label>
+              <input
+                className='input-wide form-control styled-input'
+                type='password'
+                name='accessKey'
+                placeholder={formData.role === 'admin' ? 'Owner Key' : 'Enrollment Key'}
+                value={formData.accessKey}
+                onChange={handleChange}
+                required
+              />
+            </div>
+          )}
         </div>
 
         <div className="form-section-title" style={{ marginTop: '24px' }}>
@@ -401,7 +423,7 @@ const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated,
             </thead>
             <tbody>
               {users.map((u, index) => {
-                const fullName = [u.firstName, u.lastName].filter(Boolean).join(' ');
+                const fullName = getDisplayName(u);
                 return (
                   <tr key={u.id || index} className="table-row-hover">
                     <td>

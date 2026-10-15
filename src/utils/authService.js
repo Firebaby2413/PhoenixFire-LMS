@@ -1,6 +1,5 @@
 import { supabase } from '../supabaseClient';
-
-const OWNER_KEY = 'FireKey-Creation-2026';
+import { validateAccountKey } from './academySettings';
 
 /**
  * Sign in existing user via Supabase
@@ -51,9 +50,7 @@ export async function createUser({
     throw new Error('Student ID is required for students');
   }
 
-  if (role === 'admin' && ownerKey !== OWNER_KEY) {
-    throw new Error('Invalid Owner Key');
-  }
+  validateAccountKey(role, ownerKey);
 
   // 2. Build Role-Specific Identifiers
   let computedId = null;

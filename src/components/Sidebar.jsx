@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getDisplayName } from '../utils/academySettings';
 
 const Sidebar = ({
   setView,
@@ -7,7 +8,8 @@ const Sidebar = ({
   onImportBackup,
   courses = [],
   currentUser,
-  onLogout
+  onLogout,
+  academyName = 'Phoenix Fire Technical Academy'
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -29,7 +31,7 @@ const Sidebar = ({
 
         {!isCollapsed && (
           <div className="sidebar-logo-text">
-            Phoenix Fire<br />Technical Academy
+            {academyName}
           </div>
         )}
 
@@ -48,7 +50,7 @@ const Sidebar = ({
       {!isCollapsed && (
         <div className="sidebar-user">
           <span className="sidebar-username">
-            {currentUser?.email || currentUser?.firstName || 'User'}
+            {getDisplayName(currentUser)}
           </span>
           <span className="sidebar-role">{role.toUpperCase()}</span>
         </div>

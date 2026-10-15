@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import MarkdownPreview from './MarkdownPreview';
+import { withModuleClassification } from '../utils/moduleTypes';
+import { getDisplayName } from '../utils/academySettings';
+
 import '../styles.css';
 
 function newId() {
@@ -19,27 +22,10 @@ function getStudentKeys(student) {
 
 function ensureModuleHasAssignment(mod) {
   if (!mod) return mod;
-
-  const repoUrl = mod.repo_url || mod.repoUrl || mod?.assignment?.repoUrl || '';
-  const instructionsText = mod.assignment_prompt || mod.instructions || mod?.assignment?.instructionsText || '';
-  const instructionsVideoUrl = mod.video_url || mod.videoUrl || mod?.assignment?.instructionsVideoUrl || '';
-
-  // If there is no repoUrl, it's a content-only / reading module
-  const assignmentObj = repoUrl ? {
-    repoUrl,
-    instructionsText,
-    instructionsVideoUrl,
-    submissions: Array.isArray(mod?.assignment?.submissions) ? mod.assignment.submissions : []
-  } : null;
-
-  return {
+  return withModuleClassification({
     ...mod,
-    repo_url: repoUrl,
-    assignment_prompt: instructionsText,
-    video_url: instructionsVideoUrl,
-    quiz: Array.isArray(mod?.quiz) ? mod.quiz : [],
-    assignment: assignmentObj
-  };
+    quiz: Array.isArray(mod?.quiz) ? mod.quiz : []
+  });
 }
 
 function deepCloneCourseLessons(course) {
@@ -79,7 +65,7 @@ export default function CourseEditor({
   function addLesson() {
     setLessons((prev) => [
       ...prev,
-      { id: newId(), title: 'New Lesson', description: '', modules: [] }
+      { id: newId(), title: 'New Lesson', description: '', modules: [], flashcards: [] }
     ]);
   }
 
@@ -91,6 +77,47 @@ export default function CourseEditor({
 
   function deleteLesson(lessonId) {
     setLessons((prev) => prev.filter((l) => l.id !== lessonId));
+  }
+
+  function addFlashcard(lessonId) {
+    setLessons((prev) =>
+        prev.map((l) =>
+          l.id === lessonId
+            ? {
+              ...l,
+              flashcards: [...(l.flashcards || []), { id: newId(), front: '', back: '' }]
+            }
+          : l
+        )
+    );
+  }
+
+  function updateFlashcard(lessonId, cardId, field, value) {
+    setLessons((prev) =>
+      prev.map((l) =>
+        l.id === lessonId
+          ? {
+            ...l,
+            flashcards: (l.flashcards || []).map((card) =>
+              card.id === cardId ? { ...card, [field]: value } : card
+            )
+          }
+        : l
+      )
+    );
+  }
+
+  function deleteFlashcard(lessonId, cardId) {
+    setLessons((prev) =>
+      prev.map((l) =>
+        l.id === lessonId
+          ? {
+            ...l,
+            flashcards: (l.flashcards || []).filter((card) => card.id !== cardId)
+          }
+        : l
+      )
+    );
   }
 
   function addModule(lessonId) {
@@ -109,7 +136,10 @@ export default function CourseEditor({
                   assignment_prompt: '',
                   video_url: '',
                   quiz: [],
-                  assignment: null // Content-only by default
+                  type: 'reading',
+                  is_reading: true,
+                  requires_submission: false,
+                  assignment: null
                 }
               ]
             }
@@ -147,23 +177,18 @@ export default function CourseEditor({
                 if (field === 'instructionsText') rootField = 'assignment_prompt';
                 if (field === 'instructionsVideoUrl') rootField = 'video_url';
 
-                // If clearing repoUrl and all assignment fields become empty, nullify assignment so it's a reading module
+                // Repo URL is the only thing that makes this an assignment.
                 const currentRepo = field === 'repoUrl' ? value : (m.repo_url || m.assignment?.repoUrl || '');
                 const currentPrompt = field === 'instructionsText' ? value : (m.assignment_prompt || m.assignment?.instructionsText || '');
                 const currentVideo = field === 'instructionsVideoUrl' ? value : (m.video_url || m.assignment?.instructionsVideoUrl || '');
 
-                const hasAssignmentData = Boolean(currentRepo || currentPrompt || currentVideo);
-
-                const updatedAssignment = hasAssignmentData ? {
-                  ...(m.assignment || {}),
-                  [field]: value
-                } : null;
-
-                return {
+                return withModuleClassification({
                   ...m,
                   [rootField]: value,
-                  assignment: updatedAssignment
-                };
+                  repo_url: currentRepo,
+                  assignment_prompt: currentPrompt,
+                  video_url: currentVideo
+                });
               })
             }
           : l
@@ -296,7 +321,10 @@ export default function CourseEditor({
       description,
       mentorKey,
       assignedStudentKeys,
-      lessons
+      lessons: lessons.map((lesson) => ({
+        ...lesson,
+        modules: (lesson.modules || []).map((m) => withModuleClassification(m))
+      }))
     });
   }
 
@@ -375,9 +403,7 @@ export default function CourseEditor({
                       onChange={() => handleStudentToggle(student)}
                     />
                     <span>
-                      {student.firstName || student.lastName
-                        ? `${student.firstName || ''} ${student.lastName || ''}`.trim()
-                        : student.email}{' '}
+                      {getDisplayName(student)}{' '}
                       <small style={{ opacity: 0.7 }}>
                         ({student.studentId ? `${student.studentId} • ` : ''}{student.email})
                       </small>
@@ -408,7 +434,7 @@ export default function CourseEditor({
                 if (!key) return null;
                 return (
                   <option key={key} value={key}>
-                    {m.firstName} {m.lastName} - {key}
+                    {getDisplayName(m)} - {key}
                   </option>
                 );
               })}
@@ -453,7 +479,42 @@ export default function CourseEditor({
             </button>
           </div>
 
-          <h4 style={{ marginTop: 14, color: '#a855f7' }}>Modules</h4>
+          <div className='card' style={{ marginTop: '1rem', borderColor: '#a855f7' }}>
+            <h5 style={{ margin: '0 0 8px 0', color: '#a855f7'}}>Lesson Flashcards (study tool)</h5>
+            <p className='help-text' style={{ marginBottom: 12 }}>
+              Optional practice. Flashcards do not count toward progress or passing.
+            </p>
+            {(lesson.flashcards || []).map((card) => (
+              <div key={card.id} style={{ marginBottom: 10 }}>
+                <input
+                  className='input-wide'
+                  placeholder='Front (prompt)'
+                  value={card.front || ''}
+                  onChange={(e) =>
+                    updateFlashcard(lesson.id, card.id, 'front', e.target.value)
+                  }
+                />
+                <input
+                  className='input-wide'
+                  placeholder='Back (answer)'
+                  value={card.back || ''}
+                  onChange={(e) => updateFlashcard(lesson.id, card.id, 'back', e.target.value)}
+                />
+                <button
+                  type='button'
+                  className='btn-outline btn-danger'
+                  onClick={() => deleteFlashcard(lesson.id, card.id)}
+                >
+                  Delete Card
+                </button>
+              </div>
+            ))}
+            <button type='button' className='btn-secondary' onClick={() => addFlashcard(lesson.id)}>
+              + Add Flashcard
+            </button>
+          </div>
+
+          <h4 style={{ marginTop: 14, color: '#a855f7'}}>Modules</h4>
 
           {(lesson.modules || []).length === 0 && <p>No modules yet.</p>}
 
@@ -603,7 +664,7 @@ export default function CourseEditor({
 
                 <input
                   placeholder='Starter Github repository URL (students clone this)'
-                  value={mod.assignment?.repoUrl || ''}
+                  value={mod.assignment?.repoUrl || mod.repo_url || ''}
                   onChange={(e) =>
                     updateAssignmentField(
                       lesson.id,
@@ -628,7 +689,7 @@ export default function CourseEditor({
 
                 <textarea
                   placeholder='Assignment instructions (Markdown supported)'
-                  value={mod.assignment?.instructionsText || ''}
+                  value={mod.assignment?.instructionsText || mod.assignment_prompt || ''}
                   onChange={(e) =>
                     updateAssignmentField(
                       lesson.id,
@@ -642,7 +703,7 @@ export default function CourseEditor({
 
                 <input
                   placeholder='Instruction Video URL (optional)'
-                  value={mod.assignment?.instructionsVideoUrl || ''}
+                  value={mod.assignment?.instructionsVideoUrl || mod.video_url || ''}
                   onChange={(e) =>
                     updateAssignmentField(
                       lesson.id,

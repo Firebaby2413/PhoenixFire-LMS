@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { gradeSubmission } from '../utils/storage';
 import { isStatusPassing, isStatusFailing } from '../utils/progress';
+import { requiresAssignmentSubmission } from '../utils/moduleTypes';
 
 export default function Dashboard({ courses, setCourses, currentUser, submissions = [] }) {
   const [activeTab, setActiveTab] = useState('reviewed');
@@ -69,7 +70,7 @@ export default function Dashboard({ courses, setCourses, currentUser, submission
         (lesson.modules || []).forEach((mod) => {
           // Prevent ghost/orphaned "New Module" entries without real IDs or assignment data
           const modTitle = mod.title || mod.name || '';
-          if (!mod.id || modTitle === 'New Module' || !mod.assignment) return;
+          if (!mod.id || modTitle === 'New Module' || !requiresAssignmentSubmission(mod)) return;
 
           const assignment = mod.assignment;
           const subs = assignment.submissions || [];

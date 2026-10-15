@@ -1,5 +1,6 @@
-import React from 'react';
-import { calculateCourseProgress } from '../utils/progress';
+import React, { useEffect, useState } from 'react';
+import { calculateCourseProgressDetailed } from '../utils/progress';
+import { fetchAllSubmissions } from '../utils/storage';
 import '../styles.css';
 
 export default function CourseList({
@@ -30,11 +31,13 @@ export default function CourseList({
   // STRICT PERMISSION CHECK: Only Admins and Mentors can approve/publish courses
   const canApproveCourses = ['admin', 'mentor'].includes(userRole);
 
-  const studentKey =
-    currentUser?.studentId ||
-    currentUser?.email ||
-    currentUser?.username ||
-    currentUser?.id;
+  const [submissions, setSubmissions] = useState([]);
+
+  useEffect(() => {
+    fetchAllSubmissions()
+      .then((rows) => setSubmissions(Array.isArray(rows) ? rows : []))
+      .catch(() => setSubmissions([]));
+  }, []);
 
   // Filter courses: Students only see PUBLISHED courses assigned to them
   const visibleCourses = isStudent
@@ -133,10 +136,11 @@ export default function CourseList({
 
       {/* COURSE CARDS */}
       {visibleCourses.map((course, index) => {
-        const percent =
-          isStudent && studentKey
-            ? calculateCourseProgress(course, studentKey)
-            : 0;
+        const progress =
+          isStudent && currentUser
+            ? calculateCourseProgressDetailed(course, currentUser, submissions)
+            : { percentage: 0, completedSteps: 0, totalSteps: 0 };
+        const percent = progress.percentage;
 
         const courseKey = course?.id || course?.slug || `course-${index}`;
         const isDraft = course.status === 'draft' || course.status === 'pending_approval';
@@ -169,7 +173,11 @@ export default function CourseList({
                   />
                 </div>
                 <small>
-                  {percent}% complete {percent === 100 ? '🏅' : ''}
+                  {percent}% complete
+                  {progress.totalSteps > 0
+                    ? ` · ${progress.completedSteps} of ${progress.totalSteps} portions`
+                    : ''}
+                  {percent === 100 ? ' 🏅' : ''}
                 </small>
               </div>
             )}

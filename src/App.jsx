@@ -4,13 +4,18 @@ import StudentBoard from './components/StudentProgressBoard';
 import CourseEditor from './components/CourseEditor';
 import CourseList from './components/CourseList';
 import LessonView from './components/LessonView';
+import CourseOutline from './components/CourseOutline';
+import FlashcardStudy from './components/FlashcardStudy';
 import Messages from './components/Messages';
 import SubmissionsDashboard from './components/SubmissionsDashboard';
 import UserManagement from './components/UserManagement';
 import Dashboard from './components/Dashboard';
+import Settings from './components/Settings';
 
 import { useAuth } from './context/AuthContext';
 import { exportData, importData, deleteCourse } from './utils/storage';
+import { withModuleClassification } from './utils/moduleTypes';
+import { getAcademySettings, validateAccountKey } from './utils/academySettings';
 import './styles.css';
 
 // Helper function to sanitize courses and strip orphaned/placeholder modules
@@ -27,13 +32,15 @@ const sanitizeCourses = (rawCourses) => {
 
         return {
           ...lesson,
-          modules: lesson.modules.filter((mod) => {
-            const modTitle = mod.title || mod.name || '';
-            if (!mod.id || modTitle === 'New Module') {
-              return false;
-            }
-            return true;
-          }),
+          modules: lesson.modules
+            .filter((mod) => {
+              const modTitle = mod.title || mod.name || '';
+              if (!mod.id || modTitle === 'New Module') {
+                return false;
+              }
+              return true;
+            })
+            .map((mod) => withModuleClassification(mod)),
         };
       }),
     };
@@ -78,8 +85,11 @@ export default function App() {
   const [view, setView] = useState('dashboard');
   const [authView, setAuthView] = useState('signin');
   const [theme, setTheme] = useState('dark');
+  const [academySettings, setAcademySettings] = useState(() => getAcademySettings());
   const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [activeLessonId, setActiveLessonId] = useState(null);
+  const [resumeStepIndex, setResumeStepIndex] = useState(0);
+  const [skipAutoResume, setSkipAutoResume] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
 
   useEffect(() => {
@@ -110,6 +120,13 @@ export default function App() {
 
     if (users.some((u) => u.email === email)) {
       alert('User with this email already exists.');
+      return;
+    }
+
+    try {
+      validateAccountKey(role || 'student', ownerKey);
+    } catch (err) {
+      alert(err.message);
       return;
     }
 
@@ -187,22 +204,28 @@ export default function App() {
     editor: 'Course Editor',
     users: 'User Management',
     settings: 'Account Settings',
-    lesson: 'Lesson Viewer'
+    lesson: 'Lesson Viewer', 
+    'course-outline': 'Course Contents',
+    flashcards: 'Flashcards' 
   };
 
   const handleCourseSelection = (courseOrId) => {
     const targetId = typeof courseOrId === 'object' ? courseOrId?.id : courseOrId;
-    const targetCourse = courses.find((c) => c.id === targetId);
-
     setSelectedCourseId(targetId);
+    setSkipAutoResume(false);
+    setView('course-outline');
+  };
 
-    const firstLessonId =
-      targetCourse?.lessons?.[0]?.id ||
-      targetCourse?.modules?.[0]?.id ||
-      null;
-
-    setActiveLessonId(firstLessonId);
+  const handleOpenOutlineItem = ({ lessonId, stepIndex }) => {
+    setActiveLessonId(lessonId);
+    setResumeStepIndex(Number.isFinite(stepIndex) ? stepIndex : 0);
+    setSkipAutoResume(true);
     setView('lesson');
+  };
+
+  const handleOpenFlashcards = ({ lessonId }) => {
+    setActiveLessonId(lessonId);
+    setView('flashcards');
   };
 
   const handleDeleteCourse = async (course) => {
@@ -229,6 +252,7 @@ export default function App() {
           currentView={view}
           onExportBackup={() => exportData({ users, courses })}
           onImportBackup={(file) => importData(file, setUsers, setCourses)}
+          academyName={academySettings.academyName}
           courses={courses}
           currentUser={activeUser}
           onLogout={handleLogout}
@@ -253,6 +277,7 @@ export default function App() {
               <Dashboard
                 currentUser={activeUser}
                 courses={courses}
+                users={users}
                 onUpdateCourses={setCourses}
               />
             )}
@@ -360,17 +385,46 @@ export default function App() {
               </div>
             )}
 
+            {view === 'course-outline' && (
+              <CourseOutline
+                course={courses.find((c) => c.id === selectedCourseId) || null}
+                currentUser={activeUser}
+                isStaff={isStaff}
+                onBack={() => setView(isStaff ? 'course-management' : 'courses')}
+                onOpenItem={handleOpenOutlineItem}
+                onOpenFlashcards={handleOpenFlashcards}
+              />
+            )}
+
+            {view === 'flashcards' && (
+              <FlashcardStudy
+                course={courses.find((c) => c.id === selectedCourseId) || null}
+                lesson={(courses.find((c) => c.id === selectedCourseId)?.lessons || []).find(
+                  (l) => l.id === activeLessonId
+                ) || null
+              }
+              onBack={() => setView('course-outline')}
+              />
+            )}
+
             {view === 'lesson' && (
               <LessonView
-                key={`${selectedCourseId || 'no-course'}-${activeLessonId || 'no-lesson'}`}
+                key={`${selectedCourseId || 'no-course'}-${activeLessonId || 'no-lesson'}-${resumeStepIndex}`}
                 courses={courses}
                 course={selectedCourse}
                 lesson={selectedLesson}
                 courseId={selectedCourseId}
                 lessonId={activeLessonId}
+                resumeStepIndex={resumeStepIndex}
+                skipAutoResume={skipAutoResume}
                 currentUser={activeUser}
                 setCourses={setCourses}
-                onBack={() => setView(isStaff ? 'course-management' : 'courses')}
+                onBack={() => setView('course-outline')}
+                onSelectLesson={(nextLesson) => {
+                  setActiveLessonId(nextLesson.id || nextLesson._id);
+                  setResumeStepIndex(0);
+                  setSkipAutoResume(true);
+                }}
               />
             )}
 
@@ -391,31 +445,31 @@ export default function App() {
               <UserManagement
                 currentUser={activeUser}
                 users={users}
-                onUserCreated={(existingUsers, email, password, role, studentId, securityQuestion, securityAnswer) => {
+                onUserCreated={(existingUsers, formData) => {
+                  try {
+                    validateAccountKey(formData.role || 'student', formData.accessKey);
+                  } catch (err) {
+                    alert(err.message);
+                    return;
+                  }
                   const newUser = {
                     id: Date.now().toString(),
-                    email,
-                    password,
-                    role: role || 'student',
-                    studentId,
-                    securityQuestion,
-                    securityAnswer
+                    email: formData.email,
+                    password: formData.password,
+                    role: formData.role || 'student',
+                    studentId: formData.studentId,
+                    firstName: formData.firstName,
+                    lastName: formData.lastName,
+                    name: `${formData.firstName || ''} ${formData.lastName || ''}`.trim() || formData.email
                   };
                   setUsers((prev) => [...prev, newUser]);
                 }}
-                onUserDeleted={(userIdOrEmail) => {
-                  setUsers((prev) => prev.filter((u) => u.id !== userIdOrEmail && u.email !== userIdOrEmail));
-                }}
+                
               />
             )}
 
             {view === 'progress' && (
-              <div>
-                <h2 className='section-subheading'>
-                  {isStaff ? 'Progress Tracking' : 'My Progress'}
-                </h2>
                 <StudentBoard courses={courses} users={users} currentUser={activeUser} />
-              </div>
             )}
 
             {view === 'reports' && isStaff && (
@@ -426,13 +480,25 @@ export default function App() {
             )}
 
             {view === 'settings' && (
-              <div>
-                <h2 className='section-subheading'>Account Settings</h2>
-                <div className="course-box" style={{ padding: '20px' }}>
-                  <p style={{ opacity: 0.8 }}>Logged in as: <strong>{activeUser?.email}</strong></p>
-                  <p style={{ opacity: 0.8 }}>Role: <strong style={{ textTransform: 'uppercase' }}>{activeUser?.role}</strong></p>
-                </div>
-              </div>
+              <Settings
+                currentUser={activeUser}
+                theme={theme}
+                setTheme={setTheme}
+                academySettings={academySettings}
+                onSaveAcademy={setAcademySettings}
+                onSaveUser={(updated) => {
+                  setUsers((prev) =>
+                    prev.map((u) =>
+                      u.id === updated.id || u.email === updated.email ? { ...u, ...updated } : u
+                    )
+                  );
+                  setLocalUser((prev) =>
+                    prev && (prev.id === updated.id || prev.email === updated.email)
+                      ? { ...prev, ...updated }
+                      : prev
+                  );
+                }}
+              />
             )}
 
           </div>
@@ -650,7 +716,7 @@ function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme,
             </select>
             <input
               className='input-wide'
-              placeholder='Owner Key'
+              placeholder={role === 'admin' ? 'Owner Key' : 'Enrollment Key'}
               value={ownerKey}
               onChange={(e) => setOwnerKey(e.target.value)}
             />

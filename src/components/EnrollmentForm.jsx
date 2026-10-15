@@ -58,7 +58,7 @@ export default function EnrollmentForm({ users, onUserCreated }) {
             style={{ maxWidth: '500px', margin: '20px auto' }}
         >
             <h3 className='pf-title'>Enroll Individual Student</h3>
-            <p className='help-text'>Authorized enrollment using Owner Key.</p>
+            <p className='help-text'>Authorized enrollment using Enrollment Key.</p>
 
             <form
                 onSubmit={handleSubmit}
@@ -71,7 +71,7 @@ export default function EnrollmentForm({ users, onUserCreated }) {
                         value={formData.firstName}
                         onChange={handleChange('firstName')}
                         required
-                        disable={isSubmitting}
+                        disabled={isSubmitting}
                     />
                     <input
                         className='input-wide'
@@ -120,7 +120,7 @@ export default function EnrollmentForm({ users, onUserCreated }) {
                 <input
                     className='input-wide'
                     type='password'
-                    placeholder='Enter Owner Key'
+                    placeholder='Enter Enrollment Key'
                     value={formData.ownerKey}
                     onChange={handleChange('ownerKey')}
                     required

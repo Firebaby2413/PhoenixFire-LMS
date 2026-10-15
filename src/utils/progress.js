@@ -3,6 +3,59 @@
  * and feedback history across courses, lessons, and modules.
  */
 
+import { getModuleSteps, moduleHasPortions } from './moduleTypes';
+
+export function getStudentStorageIds(student) {
+  if (!student) return [];
+  const raw =
+    typeof student === 'string'
+      ? [student]
+      : [student.id, student.studentId, student.email, student.username, student.user_id];
+  const ids = [];
+  raw.filter(Boolean).forEach((id) => {
+    const value = String(id);
+    ids.push(value);
+    ids.push(value.toLowerCase());
+  });
+  return [...new Set(ids)];
+}
+
+export function readLocalProgressMap(prefix, student) {
+  const merged = {};
+  getStudentStorageIds(student).forEach((id) => {
+    try {
+      Object.assign(merged, JSON.parse(localStorage.getItem(`${prefix}_${id}`) || '{}'));
+    } catch {
+      // ignore bad JSON
+    }
+  });
+  return merged;
+}
+
+export function writeLocalProgressFlag(prefix, student, modId, value) {
+  const key = String(modId);
+  getStudentStorageIds(student).forEach((id) => {
+    try {
+      const storageKey = `${prefix}_${id}`;
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      saved[key] = value;
+      localStorage.setItem(storageKey, JSON.stringify(saved));
+    } catch {
+      // ignore quota / private mode
+    }
+  });
+}
+
+function progressMapHas(map, modId) {
+  const entry = map[modId] ?? map[String(modId)];
+  if (entry === true || entry === 1) return true;
+  if (entry && typeof entry === 'object') {
+    if (entry.passed === true || entry.is_read === true) return true;
+    if (Number(entry.percent) >= 90) return true;
+  }
+  return false;
+}
+
 // Helper to extract all possible student identifiers into a uniform array
 export const studentKeys = (input) => {
   if (!input) return [];
@@ -92,24 +145,15 @@ export const isModuleApprovedByStudent = (mod, student, globalSubmissions = []) 
 /**
  * Checks if a non-assignment module is marked as read/completed.
  */
+
 export const isModuleCompletedByStudent = (mod, student) => {
   if (!mod || !student) return false;
   const keys = studentKeys(student);
-  const studentId = student.id || student.email;
-
-  // Check localStorage read state used in dashboard
-  if (studentId) {
-    try {
-      const savedReadState = JSON.parse(
-        localStorage.getItem(`read_modules_${studentId}`) || "{}"
-      );
-      if (savedReadState[mod.id]) return true;
-    } catch {
-      // Fall through to object checks if localStorage access is restricted
-    }
+  const savedReadState = readLocalProgressMap('read_modules', student);
+  if (progressMapHas(savedReadState, mod.id)) {
+    return true;
   }
 
-  // Fallback check on module completion arrays or properties
   if (Array.isArray(mod.completions)) {
     return mod.completions.some((c) => {
       const cKeys = studentKeys(c);
@@ -121,61 +165,38 @@ export const isModuleCompletedByStudent = (mod, student) => {
 };
 
 /**
- * Calculates total and completed modules using the unified 2-point scale:
- * Point 1: Read status
- * Point 2: Passed assignment submission
+ * Progress is one point per lesson step (reading, video, quiz, assignment),
+ * matching LessonView portions.
  */
 export const calculateCourseProgressDetailed = (course, student, globalSubmissions = []) => {
   const modules = getCourseModules(course);
-  if (modules.length === 0) {
-    return { completedCount: 0, totalCount: 0, percentage: 0 };
+  const outline = getCourseOutline(course, student, globalSubmissions);
+  const allSteps = outline.flatMap((entry) => entry.steps);
+
+  if (allSteps.length === 0) {
+    return { 
+      completedCount: 0,
+      totalCount: modules.length,
+      completedSteps: 0,
+      totalSteps: 0,
+      completedLessons: 0,
+      totalLessons: outline.length,
+      percentage: 0
+    };
   }
 
-  const totalCount = modules.length;
-  let totalProgressPoints = 0;
-  
-
-  let totalPossiblePoints = 0;
-
-  modules.forEach((mod) => {
-    const hasAssignment = !!(mod.assignment || mod.assignment_prompt || mod.questions || mod.quiz || mod.type === 'assignment');
-    const pointsPossibleForModule = hasAssignment ? 2 : 1;
-    totalPossiblePoints += pointsPossibleForModule;
-
-    const isRead = isModuleCompletedByStudent(mod, student);
-    if (isRead) {
-      totalProgressPoints += 1;
-    }
-
-    if (hasAssignment) {
-      if (isModuleApprovedByStudent(mod, student, globalSubmissions)) {
-        totalProgressPoints += 1;
-      }
-    } else {
-      if (isRead) {
-        totalProgressPoints += 1;
-      }
-    }
-  });
-
-  const percentage =
-    totalPossiblePoints > 0
-      ? Math.min(100, Math.round((totalProgressPoints / totalPossiblePoints) * 100))
-      : 0;
-
-      const completedCount = modules.filter((mod) => {
-        const hasAssignment = !!(mod.assignment || mod.assignment_prompt || mod.questions || mod.quiz || mod.type === 'assignment');
-        const isRead = isModuleCompletedByStudent(mod, student);
-        if (hasAssignment) {
-          return isRead && isModuleApprovedByStudent(mod, student, globalSubmissions);
-        }
-        return isRead;
-      }).length;
+  const totalProgressPoints = allSteps.filter((step) => step.complete).length;
+  const completedCount = outline.filter((entry) => entry.complete).length;
+  const percentage = Math.min(100, Math.round((totalProgressPoints / allSteps.length) * 100));
 
   return {
     completedCount,
-    totalCount,
-    percentage,
+    totalCount: modules.length,
+    completedSteps: totalProgressPoints,
+    totalSteps: allSteps.length,
+    completedLessons: outline.filter((entry) => entry.complete).length,
+    totalLessons: outline.length,
+    percentage
   };
 };
 
@@ -186,6 +207,85 @@ export const calculateCourseProgressDetailed = (course, student, globalSubmissio
 export const calculateCourseProgress = (course, student, globalSubmissions = []) => {
   return calculateCourseProgressDetailed(course, student, globalSubmissions).percentage;
 };
+
+function isStepDoneFromMaps(kind, mod, maps, student, globalSubmissions = []) {
+  if (kind === 'reading') {
+    return progressMapHas(maps.readMap, mod.id) || isModuleCompletedByStudent(mod, student);
+  }
+
+  if (kind === 'video') {
+    return progressMapHas(maps.watchedMap, mod.id);
+  }
+
+  if (kind === 'quiz') {
+    return progressMapHas(maps.quizMap, mod.id); 
+  }
+
+  if (kind === 'assignment') {
+    return (
+      isModuleApprovedByStudent(mod, student, globalSubmissions)
+    );
+  }
+  return false;
+}
+
+export function getCourseOutline(course, student, globalSubmissions = []) {
+  const maps = {
+    readMap: readLocalProgressMap('read_modules', student),
+    watchedMap: readLocalProgressMap('watched_videos', student),
+    quizMap: readLocalProgressMap('quiz_results', student),
+    submittedMap: readLocalProgressMap('submitted_modules', student)
+  };
+
+  const lessons = course?.lessons || [];
+  const outline = lessons.map((lesson) => {
+    const steps = [];
+    (lesson.modules || []).forEach((mod) => {
+      if (!moduleHasPortions(mod)) return;
+      getModuleSteps(mod).forEach((kind) => {
+        steps.push({ kind, mod });
+      });
+    });
+
+    const stepItems = steps.map((step, stepIndex) => ({
+      kind: step.kind,
+      mod: step.mod,
+      stepIndex,
+      complete: isStepDoneFromMaps(step.kind, step.mod, maps, student, globalSubmissions),
+      unlocked: false
+    }));
+
+    const indexesByModule = {};
+    stepItems.forEach((item, idx) => {
+      const id = String(item.mod.id);
+      if (!indexesByModule[id]) indexesByModule[id] = [];
+      indexesByModule[id].push(idx);
+    });
+    Object.keys(indexesByModule).forEach((id) => {
+      const idxs = indexesByModule[id];
+      let laterDone = false;
+      for (let i = idxs.length - 1; i >= 0; i -= 1) {
+        if (laterDone) stepItems[idxs[i]].complete = true;
+        if (stepItems[idxs[i]].complete) laterDone = true;
+      }
+    });
+
+    return { lesson, steps: stepItems };
+  });
+
+  let allPreviousDone = true;
+  outline.forEach((entry) => {
+    entry.steps.forEach((item) => {
+      item.unlocked = allPreviousDone;
+      allPreviousDone = allPreviousDone && item.complete;
+    });
+    entry.complete = entry.steps.length > 0 && entry.steps.every((item) => item.complete);
+    entry.unlocked =
+      entry.steps.length === 0 ? allPreviousDone : entry.steps.some((item) => item.unlocked);
+  });
+
+  return outline;
+}
 
 /**
  * Returns list of modules needing revision across courses for a student.
