@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import {getDisplayName } from '../utils/academySettings';
+import { getDisplayName, getEnrollmentKey } from '../utils/academySettings';
 
-const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated, onUserDeleted }) => {
+const UserManagement = ({ currentUser, users = [], academySettings = null, onUserCreated, onUserUpdated, onUserDeleted }) => {
   const [editingUserId, setEditingUserId] = useState(null);
   const [formData, setFormData] = useState({
     firstName: '',
@@ -249,6 +249,13 @@ const UserManagement = ({ currentUser, users = [], onUserCreated, onUserUpdated,
                 onChange={handleChange}
                 required
               />
+              {formData.role === 'admin' ? (
+                <p className='help-text'>The owner key is on the Settings page.</p>
+              ) : (
+                <p className='help-text'>
+                  Current enrollment key: {academySettings?.enrollmentKey || getEnrollmentKey()}
+                </p>
+              )}
             </div>
           )}
         </div>

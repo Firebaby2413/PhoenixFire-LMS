@@ -1179,8 +1179,30 @@ body.light-theme .styled-form-card,
 
 .styled-input {
   border: 1px solid rgba(255, 106, 0, 0.4);
-  background-color: rgba(2, 6, 23, 0.8);
+  background-color: #020617;
+  color: #f9fafb;
+  -webkit-text-fill-color: #f9fafb;
+  caret-color: #f9fafb;
   transition: all 0.2s ease-in-out;
+}
+
+.styled-form-card input.styled-input,
+.styled-form-card select.styled-input,
+.styled-form-card textarea.styled-input {
+  background-color: #020617;
+  color: #f9fafb;
+  -webkit-text-fill-color: #f9fafb;
+}
+
+.styled-form-card input.styled-input::placeholder,
+.styled-form-card textarea.styled-input::placeholder {
+  color: #94a3b8;
+  -webkit-text-fill-color: #94a3b8;
+}
+
+.styled-form-card select.styled-input option {
+  background-color: #020617;
+  color: #f9fafb;
 }
 
 .styled-input:focus {
@@ -1190,9 +1212,18 @@ body.light-theme .styled-form-card,
 
 body.light .styled-input,
 body.light-theme .styled-input,
-#app-wrapper.light, .styled-input {
+#app-wrapper.light .styled-input,
+body.light .styled-form-card input.styled-input,
+body.light .styled-form-card select.styled-input,
+body.light-theme .styled-form-card input.styled-input,
+body.light-theme .styled-form-card select.styled-input,
+#app-wrapper.light .styled-form-card input.styled-input,
+#app-wrapper.light .styled-form-card select.styled-input {
   border: 1px solid var(--light-border);
   background-color: #ffffff;
+  color: #111827;
+  -webkit-text-fill-color: #111827;
+  caret-color: #111827;
 }
 
 .contact-link {

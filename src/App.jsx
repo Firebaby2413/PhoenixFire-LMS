@@ -596,6 +596,38 @@ export default function App() {
               <UserManagement
                 currentUser={activeUser}
                 users={users}
+                academySettings={academySettings}
+                onUserUpdated={async (userId, formData) => {
+                  const { error } = await supabase
+                    .from('profiles')
+                    .update({
+                      email: formData.email || '',
+                      first_name: formData.firstName || '',
+                      last_name: formData.lastName || '',
+                      role: formData.role || 'student',
+                      student_id: formData.studentId || ''
+                    })
+                    .eq('id', userId);
+                  if (error) {
+                    alert(error.message);
+                    return;
+                  }
+                  setUsers((prev) =>
+                    prev.map((user) =>
+                      user.id === userId
+                        ? {
+                            ...user,
+                            email: formData.email,
+                            firstName: formData.firstName,
+                            lastName: formData.lastName,
+                            role: formData.role,
+                            studentId: formData.studentId
+                          }
+                        : user
+                    )
+                  );
+                  alert('Account updated.');
+                }}
                 onUserCreated={async (existingUsers, formData) => {
                   try {
                     await validateAccountKeyRemote(formData.role || 'student', formData.accessKey);

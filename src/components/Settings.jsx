@@ -208,7 +208,6 @@ export default function Settings({
     return `****${key.slice(-4)}`;
   };
   const maskedKey = mask(getOwnerKey());
-  const maskedEnrollmentKey = mask(getEnrollmentKey());
 
   return (
     <div>
@@ -372,7 +371,10 @@ export default function Settings({
           <div style={box}>
             <h3 style={{ marginTop: 0, color: '#f8fafc' }}>Enrollment key</h3>
             <p style={{ color: '#9ca3af', fontSize: '13px' }}>
-              Give this to staff who create students, mentors, TAs, and instructors. Do not share the owner key. Current key ends with {maskedEnrollmentKey}.
+              Give this to staff who create students, mentors, TAs, and instructors. Do not share the owner key.
+            </p>
+            <p style={{ color: '#f8fafc', fontSize: '15px' }}>
+              Current enrollment key: <strong>{academySettings?.enrollmentKey || getEnrollmentKey()}</strong>
             </p>
             <form onSubmit={handleChangeEnrollmentKey}>
               <label style={label}>Current owner key (required to change enrollment key)</label>
