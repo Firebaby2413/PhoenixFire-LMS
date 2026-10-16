@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { isStatusPassing, isStatusFailing } from '../utils/progress';
-import { fetchAllSubmissions, gradeSubmission, applyLocalGrade } from '../utils/storage';
+import { fetchAllSubmissions, gradeSubmission, applyLocalGrade, claimOrphanSubmissions, submissionOwnerId, reassignOrphanSubmissions } from '../utils/storage';
 import {
   getDisplayName,
   findStoredUser,
@@ -82,6 +82,13 @@ export default function Dashboard(props) {
   useEffect(() => {
     setInbox(readUserNotifications(user));
   }, [user?.id, user?.email]);
+
+  useEffect(() => {
+    if (!directoryUsers.length || !remoteSubmissions.length) return;
+    reassignOrphanSubmissions(remoteSubmissions, directoryUsers).catch((err) => {
+      console.error('Could not attach old submissions to the enrolled student:', err);
+    });
+  }, [directoryUsers, remoteSubmissions]);
 
   const matchesStudent = (sub) => {
     if (!sub) return false;
@@ -249,18 +256,11 @@ export default function Dashboard(props) {
       if (!text || text === 'User' || isAccountNumber(text)) return '';
       return text;
     };
-    let savedAccounts = [];
-    try {
-      const parsed = JSON.parse(localStorage.getItem('app_users') || '[]');
-      if (Array.isArray(parsed)) savedAccounts = parsed;
-    } catch (err) {
-      savedAccounts = [];
-    }
-
     const labelFor = (sub) => {
-      const studentKey = String(sub.student_id || sub.studentId || '').trim();
+      const studentKey = submissionOwnerId(sub, directoryUsers);
       const email = [sub.email, sub.studentEmail, sub.student_email, sub.student].find(isEmail) || '';
-      const person = findStoredUser([...directoryUsers, ...savedAccounts], {
+      const person = findStoredUser(directoryUsers, {
+        id: studentKey,
         studentId: studentKey,
         student_id: studentKey,
         email,
@@ -270,13 +270,14 @@ export default function Dashboard(props) {
       if (fromAccount) return fromAccount;
       const fromPrefs = readableName(getDisplayName({ id: studentKey, email, preferredName: sub.preferredName }));
       if (fromPrefs) return fromPrefs;
-      if (email) return email;
-      return 'Student';
+      if (email && !isAccountNumber(email)) return email;
+      return person?.email || 'Student';
     };
 
+    const ownedSubmissions = claimOrphanSubmissions(activeSubmissions, directoryUsers);
     const latestByThread = new Map();
-    activeSubmissions.forEach((sub) => {
-      const studentKey = String(sub.student_id || sub.studentEmail || sub.student || '').toLowerCase();
+    ownedSubmissions.forEach((sub) => {
+      const studentKey = submissionOwnerId(sub, directoryUsers);
       const modKey = String(sub.moduleId || sub.module_id || '');
       const threadId = `${studentKey}::${modKey}`;
       const prev = latestByThread.get(threadId);
@@ -286,7 +287,7 @@ export default function Dashboard(props) {
     });
     const byStudent = {};
     [...latestByThread.values()].forEach((sub) => {
-      const studentKey = String(sub.student_id || sub.studentId || sub.studentEmail || sub.student || 'unknown').toLowerCase();
+      const studentKey = submissionOwnerId(sub, directoryUsers);
       if (!byStudent[studentKey]) {
         byStudent[studentKey] = {
           key: studentKey,

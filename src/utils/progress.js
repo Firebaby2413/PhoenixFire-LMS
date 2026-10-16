@@ -48,6 +48,22 @@ export function writeLocalProgressFlag(prefix, student, modId, value) {
   });
 }
 
+export function applyRemoteModuleProgress(rows) {
+  if (!Array.isArray(rows)) return;
+  rows.forEach((row) => {
+    if (!row?.student_id || row.module_id == null) return;
+    const student = { id: String(row.student_id) };
+    const moduleId = row.module_id;
+    if (row.is_read) writeLocalProgressFlag('read_modules', student, moduleId, true);
+    if (row.is_watched) writeLocalProgressFlag('watched_videos', student, moduleId, true);
+    if (row.is_submitted) writeLocalProgressFlag('submitted_modules', student, moduleId, true);
+    const quiz = row.quiz_result;
+    if (quiz && (quiz.passed === true || Number(quiz.percent) >= 90)) {
+      writeLocalProgressFlag('quiz_results', student, moduleId, quiz);
+    }
+  });
+}
+
 function progressMapHas(map, modId) {
   const entry = map[modId] ?? map[String(modId)];
   if (entry === true || entry === 1) return true;

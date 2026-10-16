@@ -172,24 +172,6 @@ export default function App() {
         }));
       }
 
-      let localUsers = [];
-      try {
-        const saved = JSON.parse(localStorage.getItem('app_users') || '[]');
-        if (Array.isArray(saved)) localUsers = saved;
-      } catch (err) {
-        console.error('Could not read saved users:', err);
-      }
-      localUsers.forEach((localUser) => {
-        const keys = [localUser?.id, localUser?.email, localUser?.studentId]
-          .filter(Boolean)
-          .map((value) => String(value).toLowerCase());
-        const alreadyListed = rows.some((user) =>
-          [user.id, user.email, user.studentId]
-            .filter(Boolean)
-            .some((value) => keys.includes(String(value).toLowerCase()))
-        );
-        if (!alreadyListed) rows.push(localUser);
-      });
       setUsers(rows);
     });
 

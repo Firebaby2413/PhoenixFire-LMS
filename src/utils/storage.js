@@ -196,6 +196,63 @@ export const fetchStudentProgress = async (studentId, courseId, totalModules) =>
   return Math.min(progressPercent, 100);
 };
 
+function accountKeys(user) {
+  return [user?.id, user?.studentId, user?.email, user?.student_id]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLowerCase());
+}
+
+/**
+ * Old lesson work was saved under a browser id from before the Supabase account
+ * existed. With one enrolled student, that work belongs to them.
+ */
+export function claimOrphanSubmissions(submissions, users) {
+  if (!Array.isArray(submissions)) return [];
+  const roster = Array.isArray(users) ? users : [];
+  const students = roster.filter((user) => String(user?.role || '').toLowerCase() === 'student');
+  const onlyStudent = students.length === 1 ? students[0] : null;
+  const known = new Set(roster.flatMap(accountKeys));
+  const ownerId = onlyStudent
+    ? String(onlyStudent.id || onlyStudent.studentId || onlyStudent.email || '')
+    : '';
+
+  return submissions.map((sub) => {
+    const raw = String(sub?.student_id || sub?.studentId || '').trim();
+    if (!raw || !ownerId || known.has(raw.toLowerCase())) return sub;
+    return {
+      ...sub,
+      student_id: ownerId,
+      studentId: ownerId,
+      studentEmail: onlyStudent.email || ownerId,
+      student: onlyStudent.email || ownerId,
+      claimedFrom: raw
+    };
+  });
+}
+
+export function submissionOwnerId(sub, users) {
+  const [claimed] = claimOrphanSubmissions([sub], users);
+  const rawKeys = [claimed?.student_id, claimed?.studentId, claimed?.studentEmail, claimed?.email, claimed?.student]
+    .filter(Boolean)
+    .map((value) => String(value).trim().toLowerCase());
+  const owner = (Array.isArray(users) ? users : []).find((user) =>
+    accountKeys(user).some((key) => rawKeys.includes(key))
+  );
+  if (owner?.id || owner?.email) return String(owner.id || owner.email);
+  return String(claimed?.student_id || claimed?.studentEmail || 'unknown');
+}
+
+export async function reassignOrphanSubmissions(submissions, users) {
+  const claimed = claimOrphanSubmissions(submissions, users);
+  const updates = claimed.filter((sub) => sub.claimedFrom && sub.id && !String(sub.id).startsWith('c-'));
+  await Promise.all(
+    updates.map((sub) =>
+      supabase.from('submissions').update({ student_id: sub.student_id }).eq('id', sub.id)
+    )
+  );
+  return claimed;
+}
+
 export const fetchAllSubmissions = async () => {
   try {
     const { data, error } = await supabase

@@ -1,7 +1,8 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase, fetchAllSubmissions } from '../utils/storage';
 import { isReadingModule } from '../utils/moduleTypes';
-import { calculateCourseProgressDetailed, getEarnedCertificates, stampEarnedCertificates, writeLocalProgressFlag } from '../utils/progress';
+import { applyRemoteModuleProgress, calculateCourseProgressDetailed, findSubmission, getCourseOutline, getEarnedCertificates, stampEarnedCertificates, writeLocalProgressFlag } from '../utils/progress';
+import { claimOrphanSubmissions, reassignOrphanSubmissions } from '../utils/storage';
 import { getAcademySettings, getDisplayName } from '../utils/academySettings';
 import CertificateCard from './CertificateCard';
 import '../styles.css';
@@ -18,6 +19,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
   const [feedbackForms, setFeedbackForms] = useState({});
   const [certificateStamp, setCertificateStamp] = useState(0);
+  const [progressStamp, setProgressStamp] = useState(0);
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -54,44 +56,56 @@ export default function StudentProgressBoard({ courses = [], users = [], current
     loadSubmissions();
   }, [loadSubmissions]);
 
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from('module_progress')
+      .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result')
+      .then(({ data, error }) => {
+        if (cancelled || error || !Array.isArray(data)) return;
+        applyRemoteModuleProgress(claimOrphanSubmissions(data, users));
+        setProgressStamp(Date.now());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [users]);
+
   const studentUsers = useMemo(() => {
     if (!Array.isArray(users)) return [];
     return users.filter((u) => u?.role === 'student' && (u.id || u.studentId || u.email));
   }, [users]);
 
-  const submissionLookup = useMemo(() => {
-    const map = new Map();
-    submissions.forEach((s) => {
-      const studentKeys = [
-        s.student_id,
-        s.user_id,
-        s.studentId
-      ].filter(Boolean).map(k => String(k).trim().toLowerCase());
+  const progressPeople = useMemo(() => {
+    const keysOf = (user) =>
+      [user?.id, user?.studentId, user?.email]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase());
+    const currentStudentKey = String(
+      currentUser?.id || currentUser?.studentId || currentUser?.email || ''
+    )
+      .trim()
+      .toLowerCase();
+    if (!isStudentView) return studentUsers;
+    return studentUsers.filter((user) => keysOf(user).includes(currentStudentKey));
+  }, [currentUser, isStudentView, studentUsers]);
 
-      const modKeys = [
-        s.module_id,
-        s.moduleId
-      ].filter(Boolean).map(k => String(k).trim());
+  const ownedSubmissions = useMemo(
+    () => claimOrphanSubmissions(submissions, users),
+    [submissions, users]
+  );
 
-      studentKeys.forEach(sKey => {
-        modKeys.forEach(mKey => {
-          const key = `${sKey}_${mKey}`;
-          const prev = map.get(key);
-          const prevTime = prev ? new Date(prev.created_at || prev.submittedAt || 0).getTime() : -1;
-          const nextTime = new Date(s.created_at || s.submittedAt || 0).getTime();
-          if (!prev || nextTime >= prevTime) {
-            map.set(key, s);
-          }
-        });
-      });
+  useEffect(() => {
+    if (!users.length || !submissions.length) return;
+    reassignOrphanSubmissions(submissions, users).catch((err) => {
+      console.error('Could not attach old submissions to the enrolled student:', err);
     });
-    return map;
-  }, [submissions]);
+  }, [users, submissions]);
 
   const allKeys = useMemo(() => {
     const keys = [];
     courses.forEach((course) => {
-      studentUsers.forEach((student) => {
+      progressPeople.forEach((student) => {
         const studentKey = String(student.id || student.studentId || student.email || '').trim().toLowerCase();
         if (course.id && studentKey) {
           keys.push(`${course.id}_${studentKey}`);
@@ -99,7 +113,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
       });
     });
     return keys;
-  }, [courses, studentUsers]);
+  }, [courses, progressPeople]);
 
   const areAllExpanded = useMemo(() => {
     if (allKeys.length === 0) return false;
@@ -160,13 +174,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
   };
 
   if (!courses || courses.length === 0) return <p>No courses yet.</p>;
-  if (studentUsers.length === 0) return <p>No students found.</p>;
-
-  const currentStudentKey = String(currentUser?.id || currentUser?.studentId || currentUser?.email || '').trim().toLowerCase();
-
-  const displayedStudents = isStudentView 
-    ? studentUsers.filter(u => String(u.id || u.studentId || u.email || '').trim().toLowerCase() === currentStudentKey)
-    : studentUsers;
+  if (progressPeople.length === 0) return <p>No students found.</p>;
 
   return (
     <div className='section-container'>
@@ -209,10 +217,20 @@ export default function StudentProgressBoard({ courses = [], users = [], current
           <p style={{ marginTop: 0 }}>{course.description}</p>
 
           <div style={{ display: 'grid', gap: 10 }}>
-            {displayedStudents.map((student) => {
+            {progressPeople.map((student) => {
               const rawStudentId = student.id || student.studentId || student.email;
               const studentKey = String(rawStudentId).trim().toLowerCase();
-              const progress = calculateCourseProgressDetailed(course, student, submissions);
+              const progress = calculateCourseProgressDetailed(course, student, ownedSubmissions);
+              const outline = getCourseOutline(course, student, ownedSubmissions);
+              const stepsByModule = new Map();
+              outline.forEach((entry) => {
+                entry.steps.forEach((step) => {
+                  const id = String(step.mod.id);
+                  const list = stepsByModule.get(id) || [];
+                  list.push(step);
+                  stepsByModule.set(id, list);
+                });
+              });
               const percent = progress.percentage;
               const totalModules = progress.totalSteps || progress.totalCount;
               const completedModules = progress.completedSteps || progress.completedCount;
@@ -224,7 +242,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
 
               return (
                 <div
-                  key={studentKey}
+                  key={`${studentKey}-${progressStamp}`}
                   style={{
                     border: '1px solid var(--slate-700)',
                     background: 'rgba(0,0,0,0.15)',
@@ -276,7 +294,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                   {(() => {
                     const earned = stampEarnedCertificates(
                       student,
-                      getEarnedCertificates(course, student, submissions)
+                      getEarnedCertificates(course, student, ownedSubmissions)
                     );
                     const academyName = getAcademySettings().academyName;
                     const hasCertificate = earned.lessons.length > 0 || earned.course;
@@ -365,27 +383,29 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                                 </p>
                               ) : (
                                 modules.map((mod) => {
-                                  const sub = submissionLookup.get(`${studentKey}_${String(mod.id).trim()}`);
+                                  const steps = stepsByModule.get(String(mod.id)) || [];
+                                  const sub = findSubmission(ownedSubmissions, student, mod.id);
                                   const isReading = isReadingModule(mod);
                                   const isPassed = isSubmissionPassed(sub?.status);
+                                  const doneCount = steps.filter((step) => step.complete).length;
+                                  const allDone = steps.length > 0 && doneCount === steps.length;
+                                  const failed = ['fail', 'failed', 'needs_revision'].includes(
+                                    String(sub?.status || '').toLowerCase()
+                                  );
 
-                                  let displayStatus = 'Not Submitted';
+                                  let displayStatus = 'Not Completed';
                                   let statusColor = '#ff9800';
 
-                                  if (isReading) {
+                                  if (allDone) {
                                     displayStatus = 'Completed';
                                     statusColor = '#4caf50';
-                                  } else if (sub) {
-                                    if (isPassed) {
-                                      displayStatus = 'Passed';
-                                      statusColor = '#4caf50';
-                                    } else if (['fail', 'failed', 'needs_revision'].includes(String(sub.status).toLowerCase())) {
-                                      displayStatus = 'Needs Revision';
-                                      statusColor = '#f44336';
-                                    } else {
-                                      displayStatus = sub.status || 'Pending';
-                                      statusColor = '#ff9800';
-                                    }
+                                  } else if (failed) {
+                                    displayStatus = 'Needs Revision';
+                                    statusColor = '#f44336';
+                                  } else if (doneCount > 0) {
+                                    displayStatus = 'In Progress';
+                                  } else if (steps.some((step) => step.kind === 'assignment')) {
+                                    displayStatus = 'Not Submitted';
                                   }
 
                                   return (
