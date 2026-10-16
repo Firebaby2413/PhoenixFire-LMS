@@ -254,10 +254,21 @@ export default function Dashboard(props) {
     });
     const byStudent = {};
     [...latestByThread.values()].forEach((sub) => {
-      const person = findStoredUser(directoryUsers, sub) || sub;
-      const key = String(person.id || person.email || sub.student_id || 'unknown');
+      const person = findStoredUser(directoryUsers, sub);
+      const key = String(
+        person?.id ||
+        sub.student_id ||
+        sub.studentId ||
+        sub.studentEmail ||
+        sub.student ||
+        'unknown'
+      ).toLowerCase();
       if (!byStudent[key]) {
-        byStudent[key] =  { key, name: getDisplayName(person), subs: [] };
+        byStudent[key] = {
+          key,
+          name: person ? getDisplayName(person) : (sub.studentEmail || sub.student_id || 'Student'),
+          subs: []
+        };
       }
       byStudent[key].subs.push(sub);
     });
@@ -497,7 +508,7 @@ export default function Dashboard(props) {
                           )}
                         </div>
                         <p className="text-xs text-gray-400 mt-1">
-                          Student: <span className="text-gray-300">{getDisplayName(findStoredUser(directoryUsers, sub) || sub)}</span>
+                          Student: <span className="text-gray-300">{thread.name}</span>
                         </p>
                         {repoUrl && (
                           <div className="mt-2 text-xs flex items-center gap-1.5 flex-wrap">

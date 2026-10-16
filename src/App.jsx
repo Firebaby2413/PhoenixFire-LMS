@@ -21,7 +21,7 @@ import { exportData, importData, deleteCourse } from './utils/storage';
 import { withModuleClassification } from './utils/moduleTypes';
 import { getAcademySettings, validateAccountKeyRemote } from './utils/academySettings';
 import { profileFromRow } from './utils/profileShape';
-import { loadCourses, saveCourse } from './utils/courseService';
+import { loadCourses, saveCourse, uploadCourses } from './utils/courseService';
 import phoenixLogo from './assets/Images/phoenix.jpg';
 import './styles.css';
 
@@ -174,9 +174,32 @@ export default function App() {
       setUsers(rows);
     });
 
-    loadCourses().then((result) => {
-      if (cancelled || !result.ok || result.rows.length === 0) return;
-      setCourses(sanitizeCourses(result.rows));
+    loadCourses().then(async (result) => {
+      if (cancelled || !result.ok) return;
+      if (result.rows.length > 0) {
+        setCourses(sanitizeCourses(result.rows));
+        return;
+      }
+
+      const role = String(authUser.role || '').toLowerCase();
+      const canUpload = ['admin', 'mentor', 'instructor'].includes(role);
+      if (!canUpload) return;
+
+      let localCourses = [];
+      try {
+        const saved = JSON.parse(localStorage.getItem('app_courses') || '[]');
+        if (Array.isArray(saved)) localCourses = sanitizeCourses(saved);
+      } catch (err) {
+        console.error('Could not read saved courses:', err);
+      }
+      if (localCourses.length === 0) return;
+
+      try {
+        const uploaded = await uploadCourses(localCourses);
+        if (!cancelled && uploaded.length > 0) setCourses(sanitizeCourses(uploaded));
+      } catch (err) {
+        console.error('Could not store courses in Supabase:', err);
+      }
     });
 
     if (String(authUser.role || '').toLowerCase() === 'admin') {

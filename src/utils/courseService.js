@@ -40,3 +40,12 @@ export async function loadCourses() {
   if (error) return { ok: false, message: error.message, rows: [] };
   return { ok: true, message: '', rows: (data || []).map(courseFromRow) };
 }
+
+export async function uploadCourses(courses) {
+  const saved = [];
+  for (const course of courses) {
+    if (!course?.title) continue;
+    saved.push(await saveCourse(course));
+  }
+  return saved;
+}
