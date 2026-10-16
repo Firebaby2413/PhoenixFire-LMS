@@ -3,6 +3,21 @@ import React, { useState, useEffect } from 'react';
 import { AuthContext } from './AuthContext';
 import { supabase } from '../utils/supabaseClient';
 
+function userFromSession(authUser, profile) {
+  const firstName = profile?.first_name || authUser.user_metadata?.first_name || '';
+  const lastName = profile?.last_name || authUser.user_metadata?.last_name || '';
+  return {
+    id: authUser.id,
+    email: profile?.email || authUser.email,
+    firstName,
+    lastName,
+    name: `${firstName} ${lastName}`.trim() || authUser.email,
+    studentId: profile?.student_id || authUser.user_metadata?.student_id || '',
+    role: profile?.role || authUser.user_metadata?.role || 'student',
+    rawUser: authUser
+  };
+}
+
 export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -19,26 +34,16 @@ export function AuthProvider({ children }) {
         console.warn('Profile fetch note:', error.message);
       }
 
-      setCurrentUser({
-        id: authUser.id,
-        email: authUser.email,
-        firstName:
-          profile?.first_name || authUser.user_metadata?.first_name || '',
-        lastName: profile?.last_name || authUser.user_metadata?.last_name || '',
-        role: profile?.role || authUser.user_metadata?.role || 'student',
-        rawUser: authUser
-      });
+      setCurrentUser(userFromSession(authUser, profile));
     } catch (err) {
       console.error('Error attaching user profile:', err.message);
-      setCurrentUser({
-        id: authUser.id,
-        email: authUser.email,
-        firstName: authUser.user_metadata?.first_name || '',
-        lastName: authUser.user_metadata?.last_name || '',
-        role: authUser.user_metadata?.role || 'student',
-        rawUser: authUser
-      });
+      setCurrentUser(userFromSession(authUser, null));
     }
+  };
+
+  const refreshUser = async () => {
+    const { data } = await supabase.auth.getUser();
+    if (data?.user) await fetchUserProfile(data.user);
   };
 
   useEffect(() => {
@@ -88,7 +93,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ currentUser, loading, login, signUp, logout }}
+      value={{ currentUser, loading, login, signUp, logout, refreshUser }}
     >
       {!loading && children}
     </AuthContext.Provider>

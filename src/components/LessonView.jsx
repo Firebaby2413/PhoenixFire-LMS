@@ -197,6 +197,14 @@ export default function LessonView({
     const result = scoreQuiz(questions, quizAnswers, moduleId);
     setQuizResults((prev) => ({ ...prev, [String(moduleId)]: result }));
     writeLocalProgressFlag('quiz_results', currentUser, moduleId, result);
+    if (studentId) {
+      supabase.from('module_progress').upsert({
+        student_id: String(studentId),
+        module_id: String(moduleId),
+        quiz_result: result,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'student_id,module_id' });
+    }
   };
 
   const userRole = String(currentUser?.role || currentUser?.type || '').toLowerCase();
@@ -248,16 +256,28 @@ export default function LessonView({
         try {
           const { data, error} = await supabase
             .from('module_progress')
-            .select('module_id, is_read')
+            .select('module_id, is_read, is_watched, is_submitted, quiz_result')
             .eq('student_id', String(studentId));
 
             if (!error && data) {
+              const watched = {};
+              const submitted = {};
+              const quizzes = {};
               supabaseRead = data.reduce((acc, item) => {
-                if (item.is_read) {
-                  acc[String(item.module_id)] = true;
-                }
+                const moduleKey = String(item.module_id);
+                if (item.is_read) acc[moduleKey] = true;
+                if (item.is_watched) watched[moduleKey] = true;
+                if (item.is_submitted) submitted[moduleKey] = true;
+                if (item.quiz_result) quizzes[moduleKey] = item.quiz_result;
                 return acc;
               }, {});
+              if (!cancelled) {
+                setWatchedVideos((prev) => ({ ...watched, ...prev }));
+                setQuizResults((prev) => ({ ...quizzes, ...prev }));
+                Object.entries(submitted).forEach(([moduleKey, value]) => {
+                  writeLocalProgressFlag('submitted_modules', currentUser, moduleKey, value);
+                });
+              }
             }
         } catch (err) {
           console.error('Failed to load module progress:', err);
@@ -495,6 +515,14 @@ export default function LessonView({
 
     setWatchedVideos((prev) => ({ ...prev, [strModId]: nextWatched }));
     writeLocalProgressFlag('watched_videos', currentUser, strModId, nextWatched);
+    if (studentId) {
+      supabase.from('module_progress').upsert({
+        student_id: String(studentId),
+        module_id: strModId,
+        is_watched: nextWatched,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'student_id,module_id' });
+    }
   };
 
   const handleInputChange = (modId, value) => {
@@ -535,6 +563,12 @@ export default function LessonView({
       ]);
 
       writeLocalProgressFlag('submitted_modules', currentUser, moduleId, true);
+      await supabase.from('module_progress').upsert({
+        student_id: String(userId),
+        module_id: String(moduleId),
+        is_submitted: true,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'student_id,module_id' });
       alert('Assignment submitted successfully!');
     } catch (err) {
       alert('Failed to submit assignment. Check console.');

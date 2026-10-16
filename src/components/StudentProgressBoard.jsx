@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase, fetchAllSubmissions } from '../utils/storage';
 import { isReadingModule } from '../utils/moduleTypes';
-import { calculateCourseProgressDetailed, getEarnedCertificates, stampEarnedCertificates } from '../utils/progress';
+import { calculateCourseProgressDetailed, getEarnedCertificates, stampEarnedCertificates, writeLocalProgressFlag } from '../utils/progress';
 import { getAcademySettings, getDisplayName } from '../utils/academySettings';
 import CertificateCard from './CertificateCard';
 import '../styles.css';
@@ -17,6 +17,22 @@ export default function StudentProgressBoard({ courses = [], users = [], current
   const [submissions, setSubmissions] = useState([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
   const [feedbackForms, setFeedbackForms] = useState({});
+  const [certificateStamp, setCertificateStamp] = useState(0);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    supabase
+      .from('certificates')
+      .select('certificate_key, awarded_at')
+      .eq('student_id', currentUser.id)
+      .then(({ data, error }) => {
+        if (error || !Array.isArray(data)) return;
+        data.forEach((row) => {
+          writeLocalProgressFlag('certificate_dates', currentUser, row.certificate_key, row.awarded_at);
+        });
+        setCertificateStamp(Date.now());
+      });
+  }, [currentUser]);
 
   // Role helpers
   const userRole = String(currentUser?.role || '').trim().toLowerCase();
@@ -268,7 +284,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                     if (!hasCertificate && !(isStudentView && percent > 0)) return null;
 
                     return (
-                      <div className='certificate-shelf'>
+                      <div className='certificate-shelf' key={certificateStamp}>
                         <h4 className='certificate-shelf-title'>Certificates</h4>
                         {hasCertificate ? (
                           <div className='certificate-shelf-grid'>

@@ -13,11 +13,15 @@ import Dashboard from './components/Dashboard';
 import Settings from './components/Settings';
 import LiveClasses from './components/LiveClasses';
 import { readLiveClasses, LIVE_CLASSES_KEY } from './utils/liveClasses';
+import { fetchLiveClasses, migrateLocalLiveClasses, subscribeLiveClasses } from './utils/liveClassService';
+import { supabase } from './utils/supabaseClient';
 
 import { useAuth } from './context/AuthContext';
 import { exportData, importData, deleteCourse } from './utils/storage';
 import { withModuleClassification } from './utils/moduleTypes';
-import { getAcademySettings, validateAccountKey } from './utils/academySettings';
+import { getAcademySettings, validateAccountKeyRemote } from './utils/academySettings';
+import { profileFromRow } from './utils/profileShape';
+import { loadCourses, saveCourse } from './utils/courseService';
 import './styles.css';
 
 // Helper function to sanitize courses and strip orphaned/placeholder modules
@@ -50,7 +54,13 @@ const sanitizeCourses = (rawCourses) => {
 };
 
 export default function App() {
-  const { currentUser: authUser, logout: contextLogout } = useAuth() || {};
+  const {
+    currentUser: authUser,
+    login,
+    signUp,
+    logout: contextLogout,
+    refreshUser
+  } = useAuth() || {};
 
   const [users, setUsers] = useState(() => {
     try {
@@ -75,6 +85,7 @@ export default function App() {
 
   const [localUser, setLocalUser] = useState(null);
   const [liveClasses, setLiveClasses] = useState(() => readLiveClasses());
+  const [liveClassNotice, setLiveClassNotice] = useState('');
 
   useEffect(() => {
     localStorage.setItem('app_users', JSON.stringify(users));
@@ -103,6 +114,86 @@ export default function App() {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const user = authUser || localUser;
+
+    (async () => {
+      const remote = await fetchLiveClasses();
+      if (cancelled) return;
+      if (!remote.ok) {
+        if (remote.missingTable) setLiveClassNotice(remote.message);
+        return;
+      }
+
+      if (remote.rows.length === 0) {
+        const migrated = await migrateLocalLiveClasses(user);
+        if (cancelled || !migrated.ok) return;
+        setLiveClassNotice('');
+        setLiveClasses(migrated.rows);
+        return;
+      }
+
+      setLiveClassNotice('');
+      setLiveClasses(remote.rows);
+    })();
+
+    const channel = subscribeLiveClasses((rows) => {
+      if (cancelled) return;
+      setLiveClassNotice('');
+      setLiveClasses(rows);
+    });
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [authUser, localUser]);
+
+  useEffect(() => {
+    if (!authUser?.id) return undefined;
+    let cancelled = false;
+
+    supabase.from('profiles').select('*').then(({ data, error }) => {
+      if (cancelled || error) {
+        if (error) console.error('Could not load profiles:', error.message);
+        return;
+      }
+      const rows = (data || []).map(profileFromRow).filter(Boolean);
+      if (!rows.some((user) => user.id === authUser.id)) {
+        rows.push(profileFromRow({
+          id: authUser.id,
+          email: authUser.email,
+          role: authUser.role,
+          first_name: authUser.firstName,
+          last_name: authUser.lastName,
+          student_id: authUser.studentId
+        }));
+      }
+      setUsers(rows);
+    });
+
+    loadCourses().then((result) => {
+      if (cancelled || !result.ok || result.rows.length === 0) return;
+      setCourses(sanitizeCourses(result.rows));
+    });
+
+    if (String(authUser.role || '').toLowerCase() === 'admin') {
+      supabase.from('academy_settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
+        if (cancelled || !data) return;
+        setAcademySettings({
+          academyName: data.academy_name,
+          ownerKey: data.owner_key,
+          enrollmentKey: data.enrollment_key
+        });
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser]);
+
 
   const [view, setView] = useState('dashboard');
   const [authView, setAuthView] = useState('signin');
@@ -121,17 +212,16 @@ export default function App() {
   const activeUser = authUser || localUser;
 
   /* --- Auth Handlers --- */
-  const handleSignIn = (email, password) => {
-    const user = users.find((u) => u.email === email && u.password === password);
-    if (user) {
-      setLocalUser(user);
+  const handleSignIn = async (email, password) => {
+    try {
+      await login(email, password);
       setView('dashboard');
-    } else {
-      alert('Invalid email or password.');
+    } catch (err) {
+      alert(err.message || 'Invalid email or password.');
     }
   };
 
-  const handleCreateAccount = (email, password, role, ownerKey, profileData = {}) => {
+  const handleCreateAccount = async (email, password, role, ownerKey, profileData = {}) => {
     const {
       firstName = '',
       lastName = '',
@@ -140,53 +230,45 @@ export default function App() {
       securityAnswer = ''
     } = profileData;
 
-    if (users.some((u) => u.email === email)) {
-      alert('User with this email already exists.');
-      return;
-    }
-
     try {
-      validateAccountKey(role || 'student', ownerKey);
+      await validateAccountKeyRemote(role || 'student', ownerKey);
+      const result = await signUp(email, password, {
+        first_name: firstName,
+        last_name: lastName,
+        role: role || 'student',
+        student_id: studentId
+      });
+      const userId = result?.user?.id;
+      if (!userId || !result.session) {
+        alert('Account created. Confirm the email, then sign in.');
+        setAuthView('signin');
+        return;
+      }
+      const { error } = await supabase.from('profiles').upsert({
+        id: userId,
+        email,
+        first_name: firstName,
+        last_name: lastName,
+        role: role || 'student',
+        student_id: studentId,
+        security_question: securityQuestion,
+        security_answer: securityAnswer
+      });
+      if (error) throw error;
+      if (refreshUser) await refreshUser();
+      setView('dashboard');
     } catch (err) {
       alert(err.message);
-      return;
     }
-
-    const newUser = {
-      id: Date.now().toString(),
-      email,
-      password,
-      role: role || 'student',
-      ownerKey,
-      studentId,
-      firstName,
-      lastName, 
-      name: `${firstName} ${lastName}`.trim() || email.split('@')[0],
-      securityQuestion,
-      securityAnswer
-    };
-    setUsers((prev) => [...prev, newUser]);
-    setLocalUser(newUser);
-    setView('dashboard');
   };
 
-  const handleResetPassword = (email, newPassword, securityAnswer) => {
-    const userIndex = users.findIndex((u) => u.email === email);
-    if (userIndex === -1) {
-      alert('User not found.');
+  const handleResetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    if (error) {
+      alert(error.message);
       return false;
     }
-    if (
-      users[userIndex].securityAnswer &&
-      users[userIndex].securityAnswer.toLowerCase() !== securityAnswer.toLowerCase()
-    ) {
-      alert('Incorrect security answer.');
-      return false;
-    }
-    const updatedUsers = [...users];
-    updatedUsers[userIndex].password = newPassword;
-    setUsers(updatedUsers);
-    alert('Password updated successfully!');
+    alert('Check your email for a reset link.');
     setAuthView('signin');
     return true;
   };
@@ -261,6 +343,30 @@ export default function App() {
     }
   };
 
+  const persistCourse = async (course) => {
+    try {
+      const saved = await saveCourse(course);
+      setCourses((prev) => {
+        const rest = prev.filter((item) => item.id !== course.id && item.id !== saved.id);
+        return sanitizeCourses([...rest, saved]);
+      });
+      return saved;
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Could not save this course to Supabase.');
+      return null;
+    }
+  };
+
+  const handleApproveCourse = async (courseOrId) => {
+    const idToApprove = typeof courseOrId === 'object' ? courseOrId.id : courseOrId;
+    const course = typeof courseOrId === 'object'
+      ? courseOrId
+      : courses.find((item) => item.id === idToApprove);
+    if (!course) return;
+    await persistCourse({ ...course, status: 'published' });
+  };
+
   const selectedCourse = courses.find((c) => c.id === selectedCourseId) || courses[0] || null;
   const selectedLesson =
     selectedCourse?.lessons?.find((l) => l.id === activeLessonId) ||
@@ -317,12 +423,7 @@ export default function App() {
                   }
                 }}
                 onDeleteCourse={handleDeleteCourse}
-                onApproveCourse={(courseOrId) => {
-                  const idToApprove = typeof courseOrId === 'object' ? courseOrId.id : courseOrId;
-                  setCourses((prev) =>
-                    prev.map((c) => (c.id === idToApprove ? { ...c, status: 'published' } : c))
-                  );
-                }}
+                onApproveCourse={handleApproveCourse}
                 onSelectCourse={handleCourseSelection}
               />
             )}
@@ -371,15 +472,9 @@ export default function App() {
                       course={editingCourse}
                       users={users}
                       currentUser={activeUser}
-                      onSave={(updatedCourse) => {
-                        setCourses((prev) => {
-                          const exists = prev.some((c) => c.id === updatedCourse.id);
-                          if (exists) {
-                            return prev.map((c) => (c.id === updatedCourse.id ? updatedCourse : c));
-                          }
-                          return [...prev, updatedCourse];
-                        });
-                        setEditingCourse(null);
+                      onSave={async (updatedCourse) => {
+                        const saved = await persistCourse(updatedCourse);
+                        if (saved) setEditingCourse(null);
                       }}
                       onCancel={() => setEditingCourse(null)}
                     />
@@ -391,17 +486,14 @@ export default function App() {
                     users={users}
                     onEditCourse={(course) => setEditingCourse(course)}
                     onDeleteCourse={(courseOrId) => {
-                      const idToDelete = typeof courseOrId === 'object' ? courseOrId.id : courseOrId;
-                      if (window.confirm('Are you sure you want to delete this course?')) {
-                        setCourses((prev) => prev.filter((c) => c.id !== idToDelete));
+                      const course = typeof courseOrId === 'object'
+                        ? courseOrId
+                        : courses.find((item) => item.id === courseOrId);
+                      if (course && window.confirm('Are you sure you want to delete this course?')) {
+                        handleDeleteCourse(course);
                       }
                     }}
-                    onApproveCourse={(courseOrId) => {
-                      const idToApprove = typeof courseOrId === 'object' ? courseOrId.id : courseOrId;
-                      setCourses((prev) =>
-                        prev.map((c) => (c.id === idToApprove ? { ...c, status: 'published' } : c))
-                      );
-                    }}
+                    onApproveCourse={handleApproveCourse}
                     onSelectCourse={handleCourseSelection}
                   />
                 )}
@@ -471,6 +563,7 @@ export default function App() {
                 users={users}
                 sessions={liveClasses}
                 onChange={setLiveClasses}
+                remoteNotice={liveClassNotice}
               />
             )}
 
@@ -478,24 +571,32 @@ export default function App() {
               <UserManagement
                 currentUser={activeUser}
                 users={users}
-                onUserCreated={(existingUsers, formData) => {
+                onUserCreated={async (existingUsers, formData) => {
                   try {
-                    validateAccountKey(formData.role || 'student', formData.accessKey);
+                    await validateAccountKeyRemote(formData.role || 'student', formData.accessKey);
+                    const result = await signUp(formData.email, formData.password, {
+                      first_name: formData.firstName,
+                      last_name: formData.lastName,
+                      role: formData.role || 'student',
+                      student_id: formData.studentId
+                    });
+                    if (result?.user?.id && result.session) {
+                      const { error } = await supabase.from('profiles').upsert({
+                        id: result.user.id,
+                        email: formData.email,
+                        first_name: formData.firstName || '',
+                        last_name: formData.lastName || '',
+                        role: formData.role || 'student',
+                        student_id: formData.studentId || ''
+                      });
+                      if (error) throw error;
+                    }
+                    const { data } = await supabase.from('profiles').select('*');
+                    setUsers((data || []).map(profileFromRow).filter(Boolean));
+                    alert('Account created in Supabase. If you were signed out, sign in again.');
                   } catch (err) {
                     alert(err.message);
-                    return;
                   }
-                  const newUser = {
-                    id: Date.now().toString(),
-                    email: formData.email,
-                    password: formData.password,
-                    role: formData.role || 'student',
-                    studentId: formData.studentId,
-                    firstName: formData.firstName,
-                    lastName: formData.lastName,
-                    name: `${formData.firstName || ''} ${formData.lastName || ''}`.trim() || formData.email
-                  };
-                  setUsers((prev) => [...prev, newUser]);
                 }}
                 
               />
@@ -519,17 +620,25 @@ export default function App() {
                 setTheme={setTheme}
                 academySettings={academySettings}
                 onSaveAcademy={setAcademySettings}
-                onSaveUser={(updated) => {
+                onSaveUser={async (updated) => {
+                  const { error } = await supabase
+                    .from('profiles')
+                    .update({
+                      first_name: updated.firstName || '',
+                      last_name: updated.lastName || '',
+                      email: updated.email || activeUser.email
+                    })
+                    .eq('id', updated.id);
+                  if (error) {
+                    alert(error.message);
+                    return;
+                  }
                   setUsers((prev) =>
                     prev.map((u) =>
                       u.id === updated.id || u.email === updated.email ? { ...u, ...updated } : u
                     )
                   );
-                  setLocalUser((prev) =>
-                    prev && (prev.id === updated.id || prev.email === updated.email)
-                      ? { ...prev, ...updated }
-                      : prev
-                  );
+                  if (refreshUser) await refreshUser();
                 }}
               />
             )}
@@ -544,7 +653,6 @@ export default function App() {
 function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme, setTheme }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [studentId, setStudentId] = useState('');
@@ -555,17 +663,7 @@ function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme,
 
   const handleResetSubmit = (e) => {
     e.preventDefault();
-    if (password !== confirmPassword) {
-      alert('Passwords do not match!');
-      return;
-    }
-    const success = onResetPassword(email, password, securityAnswer);
-    if (success) {
-      setEmail('');
-      setPassword('');
-      setConfirmPassword('');
-      setSecurityAnswer('');
-    }
+    onResetPassword(email);
   };
 
   const handleSignInSubmit = (e) => {
@@ -644,30 +742,8 @@ function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme,
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
-            <input
-              className='input-wide'
-              placeholder='Security Answer'
-              value={securityAnswer}
-              onChange={(e) => setSecurityAnswer(e.target.value)}
-            />
-            <input
-              className='input-wide'
-              type='password'
-              placeholder='New Password'
-              autoComplete='new-password'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <input
-              className='input-wide'
-              type='password'
-              placeholder='Confirm New Password'
-              autoComplete='new-password'
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
             <button type='submit' className='btn'>
-              Reset Password
+              Email Reset Link
             </button>
             <button type='button' className='btn-secondary' onClick={() => setView('signin')}>
               Back to Sign In

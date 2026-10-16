@@ -12,6 +12,7 @@ import {
   studentsForCourse,
   toDatetimeLocalValue
 } from '../utils/liveClasses';
+import { deleteLiveClass, upsertLiveClass } from '../utils/liveClassService';
 
 const EMPTY_FORM = {
   title: '',
@@ -40,11 +41,13 @@ export default function LiveClasses({
   courses = [],
   users = [],
   sessions = [],
-  onChange
+  onChange,
+  remoteNotice = ''
 }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState('');
+  const [remoteNote, setRemoteNote] = useState('');
   const [filter, setFilter] = useState('upcoming');
 
   const isHost = canHostLiveClass(currentUser);
@@ -96,7 +99,25 @@ export default function LiveClasses({
     });
   };
 
-  const handleSubmit = (event) => {
+  const commitSession = async (session, replaceId) => {
+    const result = await upsertLiveClass(session, currentUser);
+    if (!result.ok && !result.missingTable) {
+      setError(result.message);
+      return false;
+    }
+
+    const saved = result.ok ? result.session : session;
+    const targetId = replaceId || session.id;
+    const exists = sessions.some((item) => item.id === targetId);
+    const next = exists
+      ? sessions.map((item) => (item.id === targetId ? saved : item))
+      : [...sessions, saved];
+    onChange?.(next);
+    setRemoteNote(result.missingTable ? result.message : '');
+    return true;
+  };
+
+  const handleSubmit = async (event) => {
     event.preventDefault();
     const title = form.title.trim();
     const course = hostCourses.find((item) => item.id === form.courseId);
@@ -151,10 +172,8 @@ export default function LiveClasses({
       updatedAt: new Date().toISOString()
     };
 
-    const next = existing
-      ? sessions.map((session) => (session.id === existing.id ? nextSession : session))
-      : [...sessions, nextSession];
-    onChange?.(next);
+    const saved = await commitSession(nextSession, existing?.id);
+    if (!saved) return;
 
     const when = formatClassWhen(nextSession.startsAt);
     const scheduleChanged =
@@ -187,32 +206,41 @@ export default function LiveClasses({
     });
   };
 
-  const cancelSession = (session) => {
+  const cancelSession = async (session) => {
     if (!window.confirm(`Cancel "${session.title}"? Students will no longer see it as upcoming.`)) {
       return;
     }
     const course = courseById.get(session.courseId);
-    onChange?.(
-      sessions.map((item) =>
-        item.id === session.id
-          ? { ...item, status: 'cancelled', updatedAt: new Date().toISOString() }
-          : item
-      )
+    const saved = await commitSession(
+      { ...session, status: 'cancelled', updatedAt: new Date().toISOString() },
+      session.id
     );
+    if (!saved) return;
     if (course) {
       notifyStudents(course, `Live class cancelled: ${session.title}`);
     }
     if (editingId === session.id) resetForm();
   };
 
-  const deleteSession = (session) => {
+  const deleteSession = async (session) => {
     if (!window.confirm(`Delete "${session.title}"? This cannot be undone.`)) return;
+    const result = await deleteLiveClass(session.id);
+    if (!result.ok && !result.missingTable) {
+      setError(result.message);
+      return;
+    }
     onChange?.(sessions.filter((item) => item.id !== session.id));
+    setRemoteNote(result.missingTable ? result.message : '');
     if (editingId === session.id) resetForm();
   };
 
   return (
     <div className="section-container live-classes">
+      {(remoteNote || remoteNotice) && (
+        <p className="live-class-note live-class-banner" role="status">
+          {remoteNote || remoteNotice}
+        </p>
+      )}
       {isHost && (
         <form className="course-box live-class-form" onSubmit={handleSubmit}>
           <h2 className="section-subheading span-2">

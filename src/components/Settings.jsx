@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   getAcademySettings,
   saveAcademySettings,
@@ -7,6 +7,7 @@ import {
   getUserPrefs,
   saveUserPrefs
 } from '../utils/academySettings';
+import { supabase } from '../utils/supabaseClient';
 
 const box = {
   background: '#111827',
@@ -69,6 +70,24 @@ export default function Settings({
   const [enrollOwnerConfirm, setEnrollOwnerConfirm] = useState('');
   const [newEnrollmentKey, setNewEnrollmentKey] = useState('');
   const [confirmEnrollmentKey, setConfirmEnrollmentKey] = useState('');
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    supabase
+      .from('user_preferences')
+      .select('*')
+      .eq('user_id', currentUser.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        setPreferredName(data.preferred_name || '');
+        setNotifyPassed(data.notify_passed !== false);
+        setNotifyRevision(data.notify_revision !== false);
+        setNotifyMessage(data.notify_message !== false);
+        setFeedbackSnippets(data.feedback_snippets || '');
+      });
+  }, [currentUser?.id]);
+
   const handleSaveProfile = (e) => {
     e.preventDefault();
     saveUserPrefs(currentUser, {
@@ -90,22 +109,28 @@ export default function Settings({
     alert('Profile saved.');
   };
 
-  const handleChangePassword = (e) => {
+  const handleChangePassword = async (e) => {
     e.preventDefault();
     if (!currentPassword || !newPassword) {
       alert('Enter your current password and a new password.');
-      return;
-    }
-    if(currentUser?.password && currentUser.password !== currentPassword) {
-      alert('Current password is incorrect.');
       return;
     }
     if (newPassword !== confirmPassword) {
       alert('New passwords do not match.');
       return;
     }
-    if (typeof onSaveUser === 'function') {
-      onSaveUser({ ...currentUser, password: newPassword });
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: currentUser.email,
+      password: currentPassword
+    });
+    if (signInError) {
+      alert('Current password is incorrect.');
+      return;
+    }
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      alert(error.message);
+      return;
     }
     setCurrentPassword('');
     setNewPassword('');

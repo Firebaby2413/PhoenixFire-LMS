@@ -1,3 +1,6 @@
+import { supabase } from './supabaseClient';
+import { isUuid } from './profileShape';
+
 const STORAGE_KEY = 'lms_academy_settings';
 const DEFAULT_OWNER_KEY = 'FireKey-Creation-2026';
 const DEFAULT_ENROLLMENT_KEY = 'FireKey-Enroll-2026';
@@ -23,7 +26,29 @@ export function getAcademySettings() {
 export function saveAcademySettings(patch) {
   const next = { ...getAcademySettings(), ...patch };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  supabase
+    .from('academy_settings')
+    .upsert({
+      id: 1,
+      academy_name: next.academyName,
+      owner_key: next.ownerKey,
+      enrollment_key: next.enrollmentKey
+    })
+    .then(({ error }) => {
+      if (error) console.error('Academy settings were not saved to Supabase:', error.message);
+    });
   return next;
+}
+
+export async function validateAccountKeyRemote(role, submittedKey) {
+  const { data, error } = await supabase.rpc('account_key_is_valid', {
+    requested_role: role || 'student',
+    submitted_key: String(submittedKey || '').trim()
+  });
+  if (error) throw new Error(error.message);
+  if (data !== true) {
+    throw new Error((role || 'student') === 'admin' ? 'Invalid Owner Key' : 'Invalid Enrollment Key');
+  }
 }
 
 export function getOwnerKey() {
@@ -75,6 +100,21 @@ export function getUserPrefs(user) {
 
 export function saveUserPrefs(user, prefs) {
   localStorage.setItem(prefsStorageKey(user), JSON.stringify(prefs));
+  if (isUuid(user?.id)) {
+    supabase
+      .from('user_preferences')
+      .upsert({
+        user_id: user.id,
+        preferred_name: prefs.preferredName || '',
+        notify_passed: prefs.notifyPassed !== false,
+        notify_revision: prefs.notifyRevision !== false,
+        notify_message: prefs.notifyMessage !== false,
+        feedback_snippets: prefs.feedbackSnippets || ''
+      })
+      .then(({ error }) => {
+        if (error) console.error('Preferences were not saved to Supabase:', error.message);
+      });
+  }
   return prefs;
 }
 
@@ -132,6 +172,17 @@ export function pushUserNotification(user, type, message) {
     ...readUserNotifications(user)
   ].slice(0, 40);
   localStorage.setItem(notificationKey(user), JSON.stringify(next));
+  if (isUuid(user?.id)) {
+    supabase
+      .rpc('notify_user', {
+        target_user: user.id,
+        note_type: type,
+        note_message: message
+      })
+      .then(({ error }) => {
+        if (error) console.error('Notification was not saved to Supabase:', error.message);
+      });
+  }
 }
 
 export function markNotificationsRead(user) {

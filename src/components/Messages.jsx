@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { getDisplayName, pushUserNotification } from '../utils/academySettings';
+import { supabase } from '../utils/supabaseClient';
 const STORAGE_KEY = "phoenix_lms_messages";
 
 export default function Messages({ currentUser = {}, users = [] }) {
@@ -24,26 +25,36 @@ export default function Messages({ currentUser = {}, users = [] }) {
     currentUser?.role?.toLowerCase() === "ta";
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(localMessages));
-    } catch (e) {
-      console.error("Failed to save messages to localStorage", e);
-    }
-  }, [localMessages]);
+    if (!currentUser?.id) return undefined;
+    let cancelled = false;
 
-  useEffect(() => {
-    const handleStorageChange = (e) => {
-      if (e.key === STORAGE_KEY && e.newValue) {
-        try {
-          setLocalMessages(JSON.parse(e.newValue));
-        } catch (err) {
-          console.error("Error parsing cross-tab messages", err);
-        }
-      }
+    const loadMessages = () => {
+      supabase
+        .from('messages')
+        .select('*')
+        .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
+        .order('created_at')
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            console.error('Could not load messages:', error.message);
+            return;
+          }
+          setLocalMessages(data || []);
+        });
     };
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, []);
+
+    loadMessages();
+    const channel = supabase
+      .channel(`messages-${currentUser.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, loadMessages)
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id]);
 
   const baseContacts = useMemo(() => {
     const list = Array.isArray(users) ? users : [];
@@ -64,16 +75,27 @@ export default function Messages({ currentUser = {}, users = [] }) {
     });
   }, [baseContacts, searchQuery, roleFilter]);
 
-  const sendMessage = () => {
-    if (!msgText.trim() || !selectedContact) return;
-    const newMessage = {
-      id: Date.now(),
-      sender: currentUser.email,
-      receiver: selectedContact.email,
-      text: msgText,
-      timestamp: new Date().toISOString()
-    };
-    setLocalMessages((prev) => [...prev, newMessage]);
+  const messageBody = (message) => message.body || message.text || '';
+  const messageTime = (message) => message.created_at || message.timestamp;
+  const samePerson = (messageValue, person) =>
+    messageValue === person?.id || messageValue === person?.email;
+
+  const sendMessage = async () => {
+    if (!msgText.trim() || !selectedContact?.id) return;
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        sender_id: currentUser.id,
+        receiver_id: selectedContact.id,
+        body: msgText.trim()
+      })
+      .select()
+      .single();
+    if (error) {
+      alert(error.message);
+      return;
+    }
+    setLocalMessages((prev) => [...prev, data]);
     setMsgText("");
     pushUserNotification(
       selectedContact,
@@ -236,16 +258,20 @@ export default function Messages({ currentUser = {}, users = [] }) {
                 }}
               >
                 {localMessages
-                  .filter(
-                    (m) =>
-                      (m.sender === currentUser.email && m.receiver === selectedContact.email) ||
-                      (m.sender === selectedContact.email && m.receiver === currentUser.email)
-                  )
-                  .map((m) => (
+                  .filter((m) => {
+                    const mine = samePerson(m.sender_id, currentUser) || samePerson(m.sender, currentUser);
+                    const fromThem = samePerson(m.sender_id, selectedContact) || samePerson(m.sender, selectedContact);
+                    const toThem = samePerson(m.receiver_id, selectedContact) || samePerson(m.receiver, selectedContact);
+                    const toMe = samePerson(m.receiver_id, currentUser) || samePerson(m.receiver, currentUser);
+                    return (mine && toThem) || (fromThem && toMe);
+                  })
+                  .map((m) => {
+                    const mine = samePerson(m.sender_id, currentUser) || samePerson(m.sender, currentUser);
+                    return (
                     <div
                       key={m.id}
                       style={{
-                        textAlign: m.sender === currentUser.email ? "right" : "left",
+                        textAlign: mine ? "right" : "left",
                         marginBottom: "12px"
                       }}
                     >
@@ -254,8 +280,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
                           display: "inline-block",
                           padding: "10px 14px",
                           borderRadius: "15px",
-                          background:
-                            m.sender === currentUser.email
+                          background: mine
                               ? "var(--magic-blue, #2563eb)"
                               : "#334155",
                           color: "#fff",
@@ -264,16 +289,17 @@ export default function Messages({ currentUser = {}, users = [] }) {
                           fontSize: "0.95rem"
                         }}
                       >
-                        {m.text}
+                        {messageBody(m)}
                       </div>
                       <div style={{ fontSize: "10px", opacity: 0.6, marginTop: "4px" }}>
-                        {new Date(m.timestamp).toLocaleTimeString([], {
+                        {new Date(messageTime(m)).toLocaleTimeString([], {
                           hour: "2-digit",
                           minute: "2-digit"
                         })}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", width: "100%" }}>

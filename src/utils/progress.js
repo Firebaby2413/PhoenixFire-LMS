@@ -4,6 +4,8 @@
  */
 
 import { getModuleSteps, moduleHasPortions } from './moduleTypes';
+import { supabase } from './supabaseClient';
+import { isUuid } from './profileShape';
 
 export function getStudentStorageIds(student) {
   if (!student) return [];
@@ -303,6 +305,17 @@ export function stampCertificateDate(student, certificateId) {
   if (existing[id]) return existing[id];
   const iso = new Date().toISOString();
   writeLocalProgressFlag('certificate_dates', student, id, iso);
+  if (isUuid(student?.id)) {
+    supabase
+      .from('certificates')
+      .upsert(
+        { student_id: student.id, certificate_key: id, awarded_at: iso },
+        { onConflict: 'student_id,certificate_key' }
+      )
+      .then(({ error }) => {
+        if (error) console.error('Certificate was not saved to Supabase:', error.message);
+      });
+  }
   return iso;
 }
 
