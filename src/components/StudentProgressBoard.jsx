@@ -1,8 +1,9 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase, fetchAllSubmissions } from '../utils/storage';
 import { isReadingModule } from '../utils/moduleTypes';
-import { calculateCourseProgressDetailed } from '../utils/progress';
-import { getDisplayName } from '../utils/academySettings';
+import { calculateCourseProgressDetailed, getEarnedCertificates, stampEarnedCertificates } from '../utils/progress';
+import { getAcademySettings, getDisplayName } from '../utils/academySettings';
+import CertificateCard from './CertificateCard';
 import '../styles.css';
 
 const isSubmissionPassed = (status) => {
@@ -255,6 +256,52 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                       }}
                     />
                   </div>
+
+                  {(() => {
+                    const earned = stampEarnedCertificates(
+                      student,
+                      getEarnedCertificates(course, student, submissions)
+                    );
+                    const academyName = getAcademySettings().academyName;
+                    const hasCertificate = earned.lessons.length > 0 || earned.course;
+
+                    if (!hasCertificate && !(isStudentView && percent > 0)) return null;
+
+                    return (
+                      <div className='certificate-shelf'>
+                        <h4 className='certificate-shelf-title'>Certificates</h4>
+                        {hasCertificate ? (
+                          <div className='certificate-shelf-grid'>
+                            {earned.lessons.map((cert) => (
+                              <CertificateCard
+                                key={cert.id}
+                                kind='lesson'
+                                title={cert.title}
+                                courseTitle={cert.courseTitle}
+                                studentName={getDisplayName(student)}
+                                academyName={academyName}
+                                earnedOn={cert.earnedOn}
+                              />
+                            ))}
+                            {earned.course && (
+                              <CertificateCard
+                                key={earned.course.id}
+                                kind='course'
+                                title={earned.course.title}
+                                studentName={getDisplayName(student)}
+                                academyName={academyName}
+                                earnedOn={earned.course.earnedOn}
+                              />
+                            )}
+                          </div>
+                        ) : (
+                          <p className='certificate-empty'>
+                            Complete a lesson to earn a certificate. It will be saved here.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div style={{ marginTop: 10, display: 'flex', gap: 10 }}>
                     <button

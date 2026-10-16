@@ -1,7 +1,20 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import MarkdownPreview from './MarkdownPreview';
 import { submitAssignment, fetchAllSubmissions, supabase } from '../utils/storage';
 import { isReadingModule, getModuleRepoUrl, getModuleQuizItems, getModuleSteps } from '../utils/moduleTypes';
-import { writeLocalProgressFlag, readLocalProgressMap, isStatusPassing, isStatusFailing } from '../utils/progress';
+import { 
+  writeLocalProgressFlag,
+  readLocalProgressMap,
+  isStatusPassing,
+  isStatusFailing,
+  getEarnedCertificates,
+  stampEarnedCertificates,
+  stampCertificateDate,
+  lessonCertificateId
+} from '../utils/progress';
+import { getAcademySettings, getDisplayName } from '../utils/academySettings';
+import CertificateCard from './CertificateCard';
+
 
 function getQuizAnswerKey(moduleId, question, index) {
   return `${moduleId}_${question.id || index}`;
@@ -159,6 +172,9 @@ export default function LessonView({
   const [quizResults, setQuizResults] = useState({});
   const [visibleStepIndex, setVisibleStepIndex] = useState(resumeStepIndex);
   const [watchedVideos, setWatchedVideos] = useState({});
+  const [finishNotice, setFinishNotice] = useState('');
+  const [finishScrollTick, setFinishScrollTick] = useState(0);
+  const finishPanelRef = useRef(null);
   const userMovedRef = useRef(false);
   const lastResumedLessonIdRef = useRef(null);
   const handleQuizAnswerChange = (questionKey, answer) => {
@@ -410,6 +426,36 @@ export default function LessonView({
     return lessonSteps.every((step) => isStepComplete(step));
   }, [lessonSteps, isStepComplete]);
 
+  const earnedCertificates = useMemo(() => {
+    return stampEarnedCertificates(
+      currentUser,
+      getEarnedCertificates(course, currentUser, dbSubmissions)
+    );
+  }, [course, currentUser, dbSubmissions, readModules, watchedVideos, quizResults]);
+
+  const lessonCert = useMemo(() => {
+    if (!isLessonComplete || !currentLesson) return null;
+    const certId = lessonCertificateId(course, currentLesson);
+    const stored = earnedCertificates.lessons.find((cert) => cert.id === certId);
+    if (stored) return stored;
+    return {
+      id: certId,
+      kind: 'lesson',
+      title: currentLesson.title || 'Lesson',
+      courseTitle: course?.title || 'Course',
+      earnedOn: stampCertificateDate(currentUser, certId)
+    };
+  }, [course, currentLesson, currentUser, earnedCertificates.lessons, isLessonComplete]);
+
+  useEffect(() => {
+    if (isLessonComplete) setFinishNotice('');
+  }, [isLessonComplete]);
+
+  useEffect(() => {
+    if (!finishScrollTick) return;
+    finishPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [finishScrollTick]);
+
   const handleProceedToNextLesson = () => {
     if (!nextLesson || !isLessonComplete) return;
     setCurrentLesson(nextLesson);
@@ -535,9 +581,8 @@ export default function LessonView({
           const isRead = isAdminOrMentor || !!readModules[modIdStr];
           const stepDone = isStepComplete(step);
 
-          const moduleContextText = cleanMarkdownText(
-            mod.content || mod.body || mod.markdown || mod.details || mod.text || ''
-          );
+          const moduleMarkdown =
+            mod.content || mod.body || mod.markdown || mod.details || mod.text || '';
           const videoUrl = 
           mod.assignment?.instructionsVideoUrl ||
           mod.video_url ||
@@ -557,9 +602,28 @@ export default function LessonView({
           const handleContinue = () => {
             userMovedRef.current = true;
             if (visibleStepIndex < lessonSteps.length - 1) {
+              setFinishNotice('');
               setVisibleStepIndex(visibleStepIndex + 1);
               window.scrollTo({ top: 0, behavior: 'smooth' });
+              return;
             }
+
+            if (!isLessonComplete) {
+              const stillOpen = lessonSteps.filter((step) => !isStepComplete(step));
+              const labels = stillOpen.map(
+                (step) => `${cleanMarkdownText(step.mod.title) || 'Portion'} (${step.kind})`
+              );
+              setFinishNotice(
+                labels.length
+                  ? `Finish is waiting on: ${labels.join(', ')}`
+                  : `This lesson still has unfinished portions.`
+              );
+              setFinishScrollTick((tick) => tick + 1);
+              return;
+            }
+
+            setFinishNotice('');
+            setFinishScrollTick((tick) => tick + 1);
           };
 
           const handleBackStep = () => {
@@ -599,8 +663,11 @@ export default function LessonView({
 
               {step.kind === 'reading' && (
                 <>
-                  <div style={{ background: '#030712', border: '1px solid #1f2937', padding: '20px', borderRadius: '8px', marginBottom: '16px' , color: '#e5e7eb', whiteSpace: 'pre-wrap' }}>
-                    {moduleContextText}
+                  <div
+                    className='module-markdown'
+                    style={{ background: '#030712', border: '1px solid #1f2937', padding: '20px', borderRadius: '8px', marginBottom: '16px', color: '#e5e7eb' }}
+                  >
+                    <MarkdownPreview markdown={moduleMarkdown} showHeader={false} />
                   </div>
                   {!isAdminOrMentor && (
                     <button
@@ -812,7 +879,11 @@ export default function LessonView({
                       cursor: stepDone ? 'pointer' : 'not-allowed'
                     }}
                   >
-                    {visibleStepIndex < lessonSteps.length - 1 ? 'Continue →' : 'Finish'}
+                    {visibleStepIndex < lessonSteps.length - 1
+                      ? 'Continue →'
+                      : isLessonComplete
+                        ? 'View certificate' 
+                        : 'Finish'}
                   </button>
                 </div>
               )}
@@ -820,27 +891,55 @@ export default function LessonView({
         );
         })()}
         
-        {isLessonComplete && (
-          <div style={{ background: 'rgba(16, 185, 129, 0.15)', border: '1px solid #10b981', padding: '20px', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px' }}>
-            <div>
-              <h4 style={{ margin: '0 0 4px 0', color: '#34d399', fontSize: '18px' }}>🎉 Lesson Completed Successfully!</h4>
-              <p style={{ margin: 0, color: '#9ca3af', fontSize: '14px' }}>
-                {nextLesson ? `Next up: ${nextLesson.title}` : 'You have finished all lessons in this course!'}
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: '10px' }}>
-              {nextLesson && (
-                <button 
-                  onClick={handleProceedToNextLesson} 
-                  style={{ background: '#f97316', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  Next Lesson →
-                </button>
-              )}
-              <button onClick={onBack} style={{ background: '#10b981', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}>
-                Back to Course Menu
-              </button>
-            </div>
+        {(finishNotice || lessonCert) && (
+          <div ref={finishPanelRef} style={{ display: 'grid', gap: '14px', marginTop: '10px', justifyItems: 'center' }}>
+            {finishNotice && <p className='finish-notice'>{finishNotice}</p>}
+            {lessonCert && (
+              <>
+                <CertificateCard
+                  kind='lesson'
+                  title={cleanMarkdownText(lessonCert.title)}
+                  courseTitle={lessonCert.courseTitle}
+                  studentName={getDisplayName(currentUser)}
+                  academyName={getAcademySettings().academyName}
+                  earnedOn={lessonCert.earnedOn}
+                />
+                {earnedCertificates.course && (
+                  <CertificateCard
+                    kind='course'
+                    title={earnedCertificates.course.title}
+                    studentName={getDisplayName(currentUser)}
+                    academyName={getAcademySettings().academyName}
+                    earnedOn={earnedCertificates.course.earnedOn}
+                  />
+                )}
+                <p style={{ margin: 0, width: '100%', color: '#9ca3af', fontSize: '14px' }}>
+                  {earnedCertificates.course
+                    ? 'You finished this course. Both certificates are saved on your Progress tab.'
+                    : nextLesson
+                      ? `Next up: ${nextLesson.title}. This certificate is saved on your Progress tab.`
+                      : 'This certificate is saved on your Progress tab.' }
+                </p>
+                <div className='certificate-actions'>
+                  {nextLesson && (
+                    <button
+                      type='button'
+                      onClick={handleProceedToNextLesson}
+                      style={{ background: '#f97316', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                    >
+                      Next Lesson →
+                    </button>
+                  )}
+                  <button
+                    type='button'
+                    onClick={onBack}
+                    style={{ background: '#10b981', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
+                  >
+                    Back to Course Menu
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         )}
       </div>

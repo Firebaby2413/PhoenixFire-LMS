@@ -92,7 +92,7 @@ export const exportData = (data) => {
   }
 };
 
-export const importData = (file, setUsers, setCourses) => {
+export const importData = (file, setUsers, setCourses, setLiveClasses) => {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -100,6 +100,9 @@ export const importData = (file, setUsers, setCourses) => {
       const parsed = JSON.parse(e.target.result);
       if (parsed.users && Array.isArray(parsed.users)) setUsers(parsed.users);
       if (parsed.courses && Array.isArray(parsed.courses)) setCourses(parsed.courses);
+      if (parsed.liveClasses && Array.isArray(parsed.liveClasses) && setLiveClasses) {
+        setLiveClasses(parsed.liveClasses);
+      }
       alert('Backup restored successfully!');
     } catch (error) {
       console.error('Failed to parse import file:', error);

@@ -287,6 +287,75 @@ export function getCourseOutline(course, student, globalSubmissions = []) {
   return outline;
 }
 
+export function lessonCertificateId(course, lesson) {
+  const courseId = course?.id || course?.title || 'course';
+  const lessonId = lesson?.id || lesson?._id || lesson?.title || 'lesson';
+  return `lesson:${courseId}:${lessonId}`;
+}
+
+export function courseCertificateId(course) {
+  return `course:${course?.id || course?.title || 'course'}`;
+}
+
+export function stampCertificateDate(student, certificateId) {
+  const id = String(certificateId);
+  const existing = readLocalProgressMap('certificate_dates', student);
+  if (existing[id]) return existing[id];
+  const iso = new Date().toISOString();
+  writeLocalProgressFlag('certificate_dates', student, id, iso);
+  return iso;
+}
+
+export function getEarnedCertificates(course, student, globalSubmissions = []) {
+  if (!course || !student) return { lessons: [], course: null };
+
+  const outline = getCourseOutline(course, student, globalSubmissions);
+  const dates = readLocalProgressMap('certificate_dates', student);
+  const lessons = outline
+    .filter((entry) => entry.complete && entry.lesson)
+    .map((entry) => {
+      const id = lessonCertificateId(course, entry.lesson);
+      return {
+        id,
+        kind: 'lesson',
+        title: entry.lesson.title || 'Lesson',
+        courseTitle: course.title || 'Course',
+        earnedOn: dates[id] || null
+      };
+    });
+
+  const steps = outline.flatMap((entry) => entry.steps);
+  const courseDone = steps.length > 0 && steps.every((step) => step.complete);
+  const id = courseCertificateId(course);
+
+  return {
+    lessons,
+    course: courseDone
+      ? {
+        id,
+        kind: 'course',
+        title: course.title || 'Course',
+        courseTitle: course.title || 'Course',
+        earnedOn: dates[id] || null
+      }
+    : null
+  };
+}
+
+export function stampEarnedCertificates(student, earned) {
+  const lessons = (earned?.lessons || []).map((cert) => ({
+    ...cert,
+    earnedOn: cert.earnedOn || stampCertificateDate(student, cert.id)
+  }));
+  const courseCert = earned?.course
+    ? {
+        ...earned.course,
+        earnedOn: earned.course.earnedOn || stampCertificateDate(student, earned.course.id) 
+      }
+    : null;
+  return { lessons, course: courseCert }
+}
+
 /**
  * Returns list of modules needing revision across courses for a student.
  */

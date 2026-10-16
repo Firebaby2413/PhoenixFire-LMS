@@ -11,6 +11,8 @@ import SubmissionsDashboard from './components/SubmissionsDashboard';
 import UserManagement from './components/UserManagement';
 import Dashboard from './components/Dashboard';
 import Settings from './components/Settings';
+import LiveClasses from './components/LiveClasses';
+import { readLiveClasses, LIVE_CLASSES_KEY } from './utils/liveClasses';
 
 import { useAuth } from './context/AuthContext';
 import { exportData, importData, deleteCourse } from './utils/storage';
@@ -72,6 +74,7 @@ export default function App() {
   });
 
   const [localUser, setLocalUser] = useState(null);
+  const [liveClasses, setLiveClasses] = useState(() => readLiveClasses());
 
   useEffect(() => {
     localStorage.setItem('app_users', JSON.stringify(users));
@@ -80,6 +83,25 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('app_courses', JSON.stringify(courses));
   }, [courses]);
+
+  useEffect(() => {
+    localStorage.setItem(LIVE_CLASSES_KEY, JSON.stringify(liveClasses));
+  }, [liveClasses]);
+
+  useEffect(() => {
+    const handleStorage = (event) => {
+      if (event.key === LIVE_CLASSES_KEY && event.newValue) {
+        try {
+          const parsed = JSON.parse(event.newValue);
+          if (Array.isArray(parsed)) setLiveClasses(parsed);
+        } catch (err) {
+          console.error('Failed to sync live classes', err);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
 
   const [view, setView] = useState('dashboard');
@@ -201,6 +223,7 @@ export default function App() {
     reports: 'Reports & Analytics',
     submissions: 'Submissions',
     messages: 'Messages',
+    'live-classes': 'Live Classes',
     editor: 'Course Editor',
     users: 'User Management',
     settings: 'Account Settings',
@@ -250,8 +273,8 @@ export default function App() {
         <Sidebar
           setView={setView}
           currentView={view}
-          onExportBackup={() => exportData({ users, courses })}
-          onImportBackup={(file) => importData(file, setUsers, setCourses)}
+          onExportBackup={() => exportData({ users, courses, liveClasses })}
+          onImportBackup={(file) => importData(file, setUsers, setCourses, setLiveClasses)}
           academyName={academySettings.academyName}
           courses={courses}
           currentUser={activeUser}
@@ -439,6 +462,16 @@ export default function App() {
 
             {view === 'messages' && (
               <Messages currentUser={activeUser} users={users} />
+            )}
+
+            {view === 'live-classes' && (
+              <LiveClasses
+                currentUser={activeUser}
+                courses={courses}
+                users={users}
+                sessions={liveClasses}
+                onChange={setLiveClasses}
+              />
             )}
 
             {view === 'users' && activeUser.role === 'admin' && (

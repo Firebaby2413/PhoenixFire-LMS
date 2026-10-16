@@ -95,6 +95,16 @@ const Sidebar = ({
 
         <button
           type="button"
+          className={`sidebar-btn ${currentView === 'live-classes' ? 'active' : ''}`}
+          onClick={() => setView('live-classes')}
+          title="Live Classes"
+        >
+          <span className="nav-icon">🎥</span>
+          {!isCollapsed && <span className="nav-label">Live Classes</span>}
+        </button>
+
+        <button
+          type="button"
           className={`sidebar-btn ${currentView === 'messages' ? 'active' : ''}`}
           onClick={() => setView('messages')}
           title="Messages"
