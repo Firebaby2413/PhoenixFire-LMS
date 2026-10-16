@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { getDisplayName } from '../utils/academySettings';
+import phoenixLogo from '../assets/Images/phoenix.jpg';
 
 const Sidebar = ({
   setView,
@@ -24,7 +25,7 @@ const Sidebar = ({
       {/* HEADER WITH LOGO & COLLAPSE TOGGLE */}
       <div className="sidebar-header">
         <img
-          src="/src/assets/Images/phoenix.jpg"
+          src={phoenixLogo}
           alt="Academy Logo"
           className="sidebar-logo-img"
         />

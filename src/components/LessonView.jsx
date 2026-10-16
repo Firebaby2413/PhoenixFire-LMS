@@ -182,8 +182,6 @@ export default function LessonView({
   };
 
   const handleCheckQuiz = (moduleId, questions) => {
-    if (isAdminOrMentor) return;
-
     const unanswered = questions.some((q, index) => {
       const key = getQuizAnswerKey(moduleId, q, index);
       return !String(quizAnswers[key] || '').trim();
@@ -207,9 +205,6 @@ export default function LessonView({
     }
   };
 
-  const userRole = String(currentUser?.role || currentUser?.type || '').toLowerCase();
-  const isAdminOrMentor = userRole === 'admin' || userRole === 'mentor' || currentUser?.isAdmin || currentUser?.email?.includes('admin');
-
   const studentId = currentUser?.id || currentUser?.email || '';
 
   useEffect(() => {
@@ -222,7 +217,7 @@ export default function LessonView({
     }
 
     function applyResume(readMap, watchMap, quizMap) {
-      if (isAdminOrMentor || userMovedRef.current) return;
+      if (userMovedRef.current) return;
       const steps = buildLessonSteps(currentLesson?.modules || []);
       if (steps.length === 0) return;
       const firstIncomplete = steps.findIndex(
@@ -235,10 +230,6 @@ export default function LessonView({
       if (skipAutoResume) {
         userMovedRef.current = true;
         setVisibleStepIndex(Number.isFinite(resumeStepIndex) ? resumeStepIndex : 0);
-      }
-      if (isAdminOrMentor && !skipAutoResume) {
-        setVisibleStepIndex(0);
-        return;
       }
       if (!currentUser) return;
 
@@ -295,7 +286,7 @@ export default function LessonView({
     return () => {
       cancelled = true;
     };
-  }, [currentLesson?.id, currentUser?.id, currentUser?.email, studentId, isAdminOrMentor, skipAutoResume, resumeStepIndex]);
+  }, [currentLesson?.id, currentUser?.id, currentUser?.email, studentId, skipAutoResume, resumeStepIndex]);
 
   const activeCourseId = courseId || course?.id;
   const activeLessonId = lessonId || currentLesson?.id;
@@ -343,14 +334,6 @@ export default function LessonView({
 
       const modKey = String(mod.id);
 
-      if (isAdminOrMentor) {
-        if (dbSubmissions.length > 0) {
-          const match = dbSubmissions.find(sub => String(sub.module_id) === modKey);
-          if (match) map.set(modKey, match);
-        }
-        return;
-      }
-
       const foundDbSub = dbSubmissions.find((sub) => {
         if (String(sub.module_id) !== modKey) return false;
         const subStudent = String(sub.student_id || sub.studentEmail || sub.student || '').toLowerCase();
@@ -375,7 +358,7 @@ export default function LessonView({
     });
 
     return map;
-  }, [modules, currentUser, dbSubmissions, isAdminOrMentor]);
+  }, [modules, currentUser, dbSubmissions]);
 
   const hasSubmittedAssignment = useCallback(
     (mod) => {
@@ -398,7 +381,6 @@ export default function LessonView({
   // Mentor "pass" is separate and still shows as Pending until graded.
   const isModulePassed = useCallback(
     (mod) => {
-      if (isAdminOrMentor) return true;
       const modIdStr = String(mod.id);
       const quizItems = getModuleQuizItems(mod);
       const quizResult = quizResults[modIdStr];
@@ -413,12 +395,11 @@ export default function LessonView({
 
       return hasPassedAssignment(mod);
     },
-    [isAdminOrMentor, readModules, quizResults, hasPassedAssignment]
+    [readModules, quizResults, hasPassedAssignment]
   );
 
   const isStepComplete = useCallback(
     (step) => {
-      if (isAdminOrMentor) return true;
       const modId = String(step.mod.id);
 
       if (step.kind === 'reading') {
@@ -438,7 +419,7 @@ export default function LessonView({
       }
       return false;
     }, 
-    [isAdminOrMentor, readModules, watchedVideos, quizResults, hasPassedAssignment]
+    [readModules, watchedVideos, quizResults, hasPassedAssignment]
   );
 
   const isLessonComplete = useMemo(() => {
@@ -487,7 +468,6 @@ export default function LessonView({
   };
 
   const toggleMarkRead = async (modId) => {
-    if (isAdminOrMentor) return;
     const strModId = String(modId);
     const nextReadState = !readModules[strModId];
     
@@ -509,7 +489,6 @@ export default function LessonView({
   };
 
   const toggleMarkWatched = (modId) => {
-    if (isAdminOrMentor) return;
     const strModId = String(modId);
     const nextWatched = !watchedVideos[strModId];
 
@@ -533,7 +512,6 @@ export default function LessonView({
   };
 
   const handleSubmitAssignment = async (moduleId, linkValue) => {
-    if (isAdminOrMentor) return;
     const trimmedLink = linkValue?.trim();
     if (!trimmedLink) {
       alert('Please enter a valid URL or response.');
@@ -612,7 +590,7 @@ export default function LessonView({
           const step = lessonSteps[visibleStepIndex];
           const mod = step.mod;
           const modIdStr = String(mod.id);
-          const isRead = isAdminOrMentor || !!readModules[modIdStr];
+          const isRead = !!readModules[modIdStr];
           const stepDone = isStepComplete(step);
 
           const moduleMarkdown =
@@ -703,8 +681,7 @@ export default function LessonView({
                   >
                     <MarkdownPreview markdown={moduleMarkdown} showHeader={false} />
                   </div>
-                  {!isAdminOrMentor && (
-                    <button
+                  <button
                       onClick={() => toggleMarkRead(mod.id)}
                       style={{
                         background: isRead ? '#10b981' : '#374151',
@@ -718,7 +695,6 @@ export default function LessonView({
                     >
                       {isRead ? '✓ Material Read (Completed)' : 'Mark Material as Read'}
                     </button>
-                  )}
                 </>
               )}
 
@@ -733,8 +709,7 @@ export default function LessonView({
                       style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 0 }}
                       />
                   </div>
-                  {!isAdminOrMentor && (
-                    <button
+                  <button
                       onClick={() => toggleMarkWatched(mod.id)}
                       style={{
                         background: watchedVideos[modIdStr] ? '#10b981' : '#374151',
@@ -748,7 +723,6 @@ export default function LessonView({
                     >
                       {watchedVideos[modIdStr] ? '✓ Video Watched (Completed)' : 'Mark Video as Watched'}
                     </button>
-                  )}
                 </>
               )}
 
@@ -781,8 +755,7 @@ export default function LessonView({
                       <div style={{ whiteSpace: 'pre-wrap', fontSize: '14px' }}>{assignmentPrompt}</div>
                     </div>
                   )}
-                  {!isAdminOrMentor && (
-                    <div style={{ background: '#1e293b', padding: '18px', borderRadius: '8px', border: '1px solid #334155'}}>
+                  <div style={{ background: '#1e293b', padding: '18px', borderRadius: '8px', border: '1px solid #334155'}}>
                       <h5 style={{ margin: '0 0 10px 0', color: '#f97316' }}>Assignment Submission</h5>
                       <input
                         type="text"
@@ -831,7 +804,6 @@ export default function LessonView({
                         </p>
                       )}
                     </div>
-                  )}
                 </>
               )}
 
@@ -850,8 +822,7 @@ export default function LessonView({
                       />
                     );
                   })}
-                  {!isAdminOrMentor && (
-                    <div style={{ marginTop: '12px' }}>
+                  <div style={{ marginTop: '12px' }}>
                       <button
                         type='button'
                         onClick={() => handleCheckQuiz(modIdStr, quizItems)}
@@ -874,12 +845,10 @@ export default function LessonView({
                         </p>
                       )}
                     </div>
-                  )}
                 </div>
               )}
 
-              {!isAdminOrMentor && (
-                <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   {canBackSameModule ? (
                     <button
                       type='button'
@@ -918,9 +887,8 @@ export default function LessonView({
                       : isLessonComplete
                         ? 'View certificate' 
                         : 'Finish'}
-                  </button>
+                    </button>
                 </div>
-              )}
             </div>
         );
         })()}

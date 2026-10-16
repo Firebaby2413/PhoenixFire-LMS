@@ -22,6 +22,7 @@ import { withModuleClassification } from './utils/moduleTypes';
 import { getAcademySettings, validateAccountKeyRemote } from './utils/academySettings';
 import { profileFromRow } from './utils/profileShape';
 import { loadCourses, saveCourse } from './utils/courseService';
+import phoenixLogo from './assets/Images/phoenix.jpg';
 import './styles.css';
 
 // Helper function to sanitize courses and strip orphaned/placeholder modules
@@ -694,7 +695,7 @@ function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme,
         </button>
 
         <img
-          src='/src/assets/Images/phoenix.jpg'
+          src={phoenixLogo}
           alt='Phoenix Fire Technical Academy'
           className='auth-logo'
         />

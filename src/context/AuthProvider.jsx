@@ -24,13 +24,25 @@ export function AuthProvider({ children }) {
 
   const fetchUserProfile = async (authUser) => {
     try {
-      const { data: profile, error } = await supabase
+      let { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', authUser.id)
         .single();
 
-      if (error && error.code !== 'PGRST116') {
+      if (error?.code === 'PGRST116' || !profile) {
+        const metadata = authUser.user_metadata || {};
+        const draft = {
+          id: authUser.id,
+          email: authUser.email,
+          role: metadata.role || 'student',
+          first_name: metadata.first_name || '',
+          last_name: metadata.last_name || '',
+          student_id: metadata.student_id || ''
+        };
+        const saved = await supabase.from('profiles').upsert(draft).select().single();
+        if (!saved.error) profile = saved.data;
+      } else if (error) {
         console.warn('Profile fetch note:', error.message);
       }
 
