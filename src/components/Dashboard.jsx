@@ -263,10 +263,16 @@ export default function Dashboard(props) {
         sub.student ||
         'unknown'
       ).toLowerCase();
+      const savedName = getDisplayName(
+        person || {
+          id: sub.student_id || sub.studentId,
+          email: sub.studentEmail || (String(sub.student || '').includes('@') ? sub.student : '')
+        }
+      );
       if (!byStudent[key]) {
         byStudent[key] = {
           key,
-          name: person ? getDisplayName(person) : (sub.studentEmail || sub.student_id || 'Student'),
+          name: savedName === 'User' ? 'Student' : savedName,
           subs: []
         };
       }
