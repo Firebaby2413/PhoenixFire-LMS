@@ -242,6 +242,38 @@ export default function Dashboard(props) {
   const activeSubmissions = extractSubmissions();
 
   const studentThreads = (() => {
+    const isEmail = (value) => String(value || '').includes('@');
+    const isAccountNumber = (value) => /^\d{8,}$/.test(String(value || '').trim());
+    const readableName = (value) => {
+      const text = String(value || '').trim();
+      if (!text || text === 'User' || isAccountNumber(text)) return '';
+      return text;
+    };
+    let savedAccounts = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem('app_users') || '[]');
+      if (Array.isArray(parsed)) savedAccounts = parsed;
+    } catch (err) {
+      savedAccounts = [];
+    }
+
+    const labelFor = (sub) => {
+      const studentKey = String(sub.student_id || sub.studentId || '').trim();
+      const email = [sub.email, sub.studentEmail, sub.student_email, sub.student].find(isEmail) || '';
+      const person = findStoredUser([...directoryUsers, ...savedAccounts], {
+        studentId: studentKey,
+        student_id: studentKey,
+        email,
+        studentEmail: email
+      });
+      const fromAccount = readableName(person ? getDisplayName(person) : '');
+      if (fromAccount) return fromAccount;
+      const fromPrefs = readableName(getDisplayName({ id: studentKey, email, preferredName: sub.preferredName }));
+      if (fromPrefs) return fromPrefs;
+      if (email) return email;
+      return 'Student';
+    };
+
     const latestByThread = new Map();
     activeSubmissions.forEach((sub) => {
       const studentKey = String(sub.student_id || sub.studentEmail || sub.student || '').toLowerCase();
@@ -254,29 +286,15 @@ export default function Dashboard(props) {
     });
     const byStudent = {};
     [...latestByThread.values()].forEach((sub) => {
-      const person = findStoredUser(directoryUsers, sub);
-      const key = String(
-        person?.id ||
-        sub.student_id ||
-        sub.studentId ||
-        sub.studentEmail ||
-        sub.student ||
-        'unknown'
-      ).toLowerCase();
-      const savedName = getDisplayName(
-        person || {
-          id: sub.student_id || sub.studentId,
-          email: sub.studentEmail || (String(sub.student || '').includes('@') ? sub.student : '')
-        }
-      );
-      if (!byStudent[key]) {
-        byStudent[key] = {
-          key,
-          name: savedName === 'User' ? 'Student' : savedName,
+      const studentKey = String(sub.student_id || sub.studentId || sub.studentEmail || sub.student || 'unknown').toLowerCase();
+      if (!byStudent[studentKey]) {
+        byStudent[studentKey] = {
+          key: studentKey,
+          name: labelFor(sub),
           subs: []
         };
       }
-      byStudent[key].subs.push(sub);
+      byStudent[studentKey].subs.push(sub);
     });
     return Object.values(byStudent).sort((a, b) => a.name.localeCompare(b.name));
   })();
