@@ -689,6 +689,50 @@ body.light-theme .module-card,
   overflow-y: auto;
 }
 
+/* Messages stays inside the window: contacts scroll in their column,
+   and the composer stays at the bottom of the chat panel. */
+#layout.layout-messages {
+  overflow: hidden;
+}
+
+#content.content-messages {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#content.content-messages .content-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#content.content-messages .section-container {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+#content.content-messages .messaging-container,
+#content.content-messages .messages-contacts-sidebar,
+#content.content-messages .messages-chat-panel {
+  min-height: 0;
+}
+
+#content.content-messages .messaging-container,
+#content.content-messages .messages-contacts-sidebar,
+#content.content-messages .messages-chat-panel {
+  overflow: hidden;
+}
+
+#content.content-messages .messages-thread,
+#content.content-messages .messages-contact-list {
+  min-height: 0;
+}
+
 .section-container {
   max-width: 960px;
   margin: 0 auto;
@@ -932,6 +976,31 @@ body.light-theme .sidebar-btn:hover,
     padding: 16px 12px;
   }
 
+  #layout.layout-messages {
+    overflow: visible;
+  }
+
+  #content.content-messages,
+  #content.content-messages .content-body,
+  #content.content-messages .section-container {
+    display: block;
+    overflow: visible;
+  }
+
+  #content.content-messages .messaging-container,
+  #content.content-messages .messages-chat-panel {
+    overflow: visible;
+  }
+
+  #content.content-messages .messages-contacts-sidebar {
+    overflow-y: auto;
+  }
+
+  #content.content-messages .messages-thread,
+  #content.content-messages .messages-contact-list {
+    min-height: 200px;
+  }
+
   /* Messaging side-by-side to vertical column conversion */
   .messaging-container {
     flex-direction: column !important;
@@ -946,6 +1015,7 @@ body.light-theme .sidebar-btn:hover,
     padding-right: 0 !important;
     padding-bottom: 16px;
     max-height: 250px;
+    overflow-y: auto;
   }
 
   .messages-chat-panel {

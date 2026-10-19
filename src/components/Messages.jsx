@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { getDisplayName, pushUserNotification } from '../utils/academySettings';
 import { supabase } from '../utils/supabaseClient';
 const STORAGE_KEY = "phoenix_lms_messages";
@@ -18,6 +18,8 @@ export default function Messages({ currentUser = {}, users = [] }) {
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
+
+  const threadRef = useRef(null);
 
   const isStaff =
     currentUser?.role?.toLowerCase() === "admin" ||
@@ -55,6 +57,12 @@ export default function Messages({ currentUser = {}, users = [] }) {
       supabase.removeChannel(channel);
     };
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    thread.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [localMessages, selectedContact]);
 
   const baseContacts = useMemo(() => {
     const list = Array.isArray(users) ? users : [];
@@ -105,7 +113,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
   };
 
   return (
-    <div className="section-container" style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+    <div className="section-container" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       {/* Messaging Grid Container */}
       <div className="messaging-container" style={{ display: "flex", flex: 1, gap: "20px", minHeight: 0 }}>
         {/* Contacts Sidebar with Small Arrow Toggle */}
@@ -185,7 +193,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
               </div>
 
               {/* Contact Scroll Area */}
-              <div style={{ flex: 1, overflowY: "auto", marginTop: "5px" }}>
+              <div className="messages-contact-list" style={{ flex: 1, overflowY: "auto", marginTop: "5px" }}>
                 {filteredContacts.length === 0 && (
                   <p className="messages-empty-text" style={{ opacity: 0.7 }}>
                     No contacts available.
@@ -246,6 +254,8 @@ export default function Messages({ currentUser = {}, users = [] }) {
               </div>
 
               <div
+                ref={threadRef}
+                className="messages-thread"
                 style={{
                   flex: 1,
                   overflowY: "auto",
@@ -253,8 +263,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
                   background: "rgba(0,0,0,0.2)",
                   borderRadius: "12px",
                   border: "1px solid var(--pf-border, #334155)",
-                  marginBottom: "15px",
-                  minHeight: "200px"
+                  marginBottom: "15px"
                 }}
               >
                 {localMessages
@@ -265,6 +274,8 @@ export default function Messages({ currentUser = {}, users = [] }) {
                     const toMe = samePerson(m.receiver_id, currentUser) || samePerson(m.receiver, currentUser);
                     return (mine && toThem) || (fromThem && toMe);
                   })
+                  .slice()
+                  .reverse()
                   .map((m) => {
                     const mine = samePerson(m.sender_id, currentUser) || samePerson(m.sender, currentUser);
                     return (

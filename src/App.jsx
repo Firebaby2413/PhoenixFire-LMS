@@ -400,7 +400,7 @@ export default function App() {
 
   return (
     <div id='app-wrapper' className={theme}>
-      <div id='layout'>
+      <div id='layout' className={view === 'messages' ? 'layout-messages' : undefined}>
         <Sidebar
           setView={setView}
           currentView={view}
@@ -412,7 +412,7 @@ export default function App() {
           onLogout={handleLogout}
         />
 
-        <main id='content'>
+        <main id='content' className={view === 'messages' ? 'content-messages' : undefined}>
           <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h1 className='pf-title bg-gradient-to-r from-orange-400 via-pink-500 to-purple-500 bg-clip-text text-transparent' style={{ margin: 0 }}>
               {viewTitles[view] || view}
