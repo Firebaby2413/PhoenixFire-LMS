@@ -105,6 +105,16 @@ const Sidebar = ({
         </button>
 
         <button
+          type='button'
+          className={`sidebar-btn ${currentView === 'lounge' ? 'active' : ''}`}
+          onClick={() => setView('lounge')}
+          title='Student Lounge'
+        >
+          <span className='nav-icon'>🛋️</span>
+          {!isCollapsed && <span className='nav-label'>Student Lounge</span>}
+        </button>
+
+        <button
           type="button"
           className={`sidebar-btn ${currentView === 'messages' ? 'active' : ''}`}
           onClick={() => setView('messages')}

@@ -1561,6 +1561,176 @@ a.btn-secondary {
   }
 }
 
+.lounge-page {
+  max-width: none;
+}
+
+.lounge-layout {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+
+.lounge-list,
+.lounge-main {
+  min-height: 0;
+}
+
+.lounge-list {
+  overflow: auto;
+}
+
+.lounge-list h2,
+.lounge-panel h3,
+.lounge-create h3 {
+  margin-top: 0;
+}
+
+.lounge-choice {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.7);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.lounge-choice.is-active {
+  background: rgba(255, 106, 0, 0.25);
+  border-color: var(--phoenix-orange);
+}
+
+.lounge-create {
+  margin-top: 16px;
+}
+
+.lounge-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lounge-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.lounge-heading h2 {
+  margin: 0 0 4px 0;
+}
+
+.lounge-heading p {
+  margin: 0;
+  opacity: 0.85;
+}
+
+.lounge-remove {
+  width: auto;
+  margin-top: 0;
+}
+
+.lounge-panels {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 250px;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.lounge-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.lounge-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.lounge-person,
+.lounge-message header,
+.lounge-room p {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lounge-role {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  opacity: 0.75;
+}
+
+.lounge-message {
+  margin-bottom: 12px;
+}
+
+.lounge-message header {
+  font-size: 0.85rem;
+  opacity: 0.8;
+}
+
+.lounge-message p {
+  margin: 4px 0 0 0;
+}
+
+.lounge-message.is-mine p {
+  color: #fdba74;
+}
+
+.lounge-help {
+  margin-top: 0;
+  opacity: 0.85;
+}
+
+.lounge-room {
+  margin-bottom: 14px;
+}
+
+.lounge-room h4 {
+  margin: 0 0 4px 0;
+}
+
+.lounge-composer .btn,
+.lounge-room .btn,
+.lounge-room .btn-secondary,
+.lounge-create .btn {
+  width: 100%;
+}
+
+.lounge-composer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.lounge-composer .input-wide,
+.lounge-create .input-wide {
+  margin-top: 8px;
+}
+
+.lounge-composer .btn {
+  width: auto;
+  margin-top: 8px;
+}
+
+@media (max-width: 980px) {
+  .lounge-layout,
+  .lounge-panels {
+    grid-template-columns: 1fr;
+  }
+}
 
 
 

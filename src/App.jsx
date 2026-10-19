@@ -12,6 +12,7 @@ import UserManagement from './components/UserManagement';
 import Dashboard from './components/Dashboard';
 import Settings from './components/Settings';
 import LiveClasses from './components/LiveClasses';
+import StudentLounge from './components/StudentLounge';
 import { readLiveClasses, LIVE_CLASSES_KEY } from './utils/liveClasses';
 import { fetchLiveClasses, migrateLocalLiveClasses, subscribeLiveClasses } from './utils/liveClassService';
 import { supabase } from './utils/supabaseClient';
@@ -331,6 +332,7 @@ export default function App() {
     submissions: 'Submissions',
     messages: 'Messages',
     'live-classes': 'Live Classes',
+    lounge: 'Student Lounge',
     editor: 'Course Editor',
     users: 'User Management',
     settings: 'Account Settings',
@@ -398,9 +400,11 @@ export default function App() {
     selectedCourse?.lessons?.[0] ||
     null;
 
+  const fillsWindow = view === 'messages' || view === 'lounge';
+
   return (
     <div id='app-wrapper' className={theme}>
-      <div id='layout' className={view === 'messages' ? 'layout-messages' : undefined}>
+      <div id='layout' className={fillsWindow ? 'layout-messages' : undefined}>
         <Sidebar
           setView={setView}
           currentView={view}
@@ -412,7 +416,7 @@ export default function App() {
           onLogout={handleLogout}
         />
 
-        <main id='content' className={view === 'messages' ? 'content-messages' : undefined}>
+        <main id='content' className={fillsWindow ? 'content-messages' : undefined}>
           <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
             <h1 className='pf-title bg-gradient-to-r from-orange-400 via-pink-500 to-purple-500 bg-clip-text text-transparent' style={{ margin: 0 }}>
               {viewTitles[view] || view}
@@ -590,6 +594,10 @@ export default function App() {
                 onChange={setLiveClasses}
                 remoteNotice={liveClassNotice}
               />
+            )}
+
+            {view === 'lounge' && (
+              <StudentLounge currentUser={activeUser} />
             )}
 
             {view === 'users' && activeUser.role === 'admin' && (
