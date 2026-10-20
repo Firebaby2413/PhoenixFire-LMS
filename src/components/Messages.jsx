@@ -1,7 +1,69 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { getDisplayName, pushUserNotification } from '../utils/academySettings';
+import { getDisplayName, pushUserNotification, readUserNotifications } from '../utils/academySettings';
 import { supabase } from '../utils/supabaseClient';
 const STORAGE_KEY = "phoenix_lms_messages";
+const SEEN_KEY_PREFIX = 'lms_message_seen_';
+
+function readSeenMap(userId) {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(`${SEEN_KEY_PREFIX}${userId}`) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSeenMap(userId, seenMap) {
+  localStorage.setItem(`${SEEN_KEY_PREFIX}${userId}`, JSON.stringify(seenMap));
+}
+
+function seedSeenMap(rows, user, people) {
+  const seen = {};
+  rows.forEach((row) => {
+    if (row.receiver_id !== user.id || !row.sender_id || !row.created_at) return;
+    if (!seen[row.sender_id] || row.created_at > seen[row.sender_id]) {
+      seen[row.sender_id] = row.created_at;
+    }
+  });
+
+  readUserNotifications(user)
+    .filter((note) => note.type === 'message' && !note.read)
+    .forEach((note) => {
+      const sender = people.find((person) => note.message === `New message from ${getDisplayName(person)}`);
+      if (!sender?.id || !seen[sender.id]) return;
+      seen[sender.id] = new Date(new Date(seen[sender.id]).getTime() - 1).toISOString();
+    });
+
+    return seen;
+}
+
+function incomingNotices(rows, user, people, seenMap) {
+  const bySender = new Map();
+  rows.forEach((row) => {
+    if (row.receiver_id !== user.id || row.sender_id === user.id || !row.id) return;
+    const list = bySender.get(row.sender_id) || [];
+    list.push(row);
+    bySender.set(row.sender_id, list);
+  });
+
+  const notes = [];
+  bySender.forEach((list, senderId) => {
+    const seenAt = seenMap[senderId] ? new Date(seenMap[senderId]).getTime() : 0;
+    const unread = list.filter((row) => new Date(row.created_at).getTime() > seenAt);
+    if (!unread.length) return;
+    const newest = unread.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+    const sender = people.find((person) => person.id === senderId);
+    notes.push({
+      id: newest.id,
+      senderId,
+      senderName: sender ? getDisplayName(sender) : 'Someone',
+      preview: (newest.body || '').slice(0, 80),
+      count: unread.length
+    });
+  });
+
+  return notes;
+}
 
 export default function Messages({ currentUser = {}, users = [] }) {
   const [selectedContact, setSelectedContact] = useState(null);
@@ -20,11 +82,17 @@ export default function Messages({ currentUser = {}, users = [] }) {
   const [roleFilter, setRoleFilter] = useState("all");
 
   const threadRef = useRef(null);
+  const usersRef = useRef(users);
+  const [seenMap, setSeenMap] = useState(() => (currentUser?.id ? readSeenMap(currentUser.id) : {}));
 
   const isStaff =
     currentUser?.role?.toLowerCase() === "admin" ||
     currentUser?.role?.toLowerCase() === "mentor" ||
     currentUser?.role?.toLowerCase() === "ta";
+
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users]);
 
   useEffect(() => {
     if (!currentUser?.id) return undefined;
@@ -43,6 +111,16 @@ export default function Messages({ currentUser = {}, users = [] }) {
             return;
           }
           setLocalMessages(data || []);
+          const rows = data || [];
+          const key = `${SEEN_KEY_PREFIX}${currentUser.id}`;
+          if (!localStorage.getItem(key)) {
+            if (!rows.length) return;
+            const seeded = seedSeenMap(rows, currentUser, usersRef.current);
+            writeSeenMap(currentUser.id, seeded);
+            setSeenMap(seeded);
+            return;
+          }
+          setSeenMap(readSeenMap(currentUser.id));
         });
     };
 
@@ -56,7 +134,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.id]);
+  }, [currentUser]);
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -110,6 +188,20 @@ export default function Messages({ currentUser = {}, users = [] }) {
       'message',
       `New message from ${getDisplayName(currentUser)}`
     );
+  };
+
+  const incoming = useMemo(() => {
+    return incomingNotices(localMessages, currentUser, users, seenMap)
+      .filter((note) => note.senderId !== selectedContact?.id);
+  }, [localMessages, currentUser, users, seenMap, selectedContact?.id]);
+
+  const openContact = (person) => {
+    setSelectedContact(person);
+    setSeenMap((prev) => {
+      const next = { ...prev, [person.id]: new Date().toISOString() };
+      if (currentUser?.id) writeSeenMap(currentUser.id, next);
+      return next;
+    });
   };
 
   return (
@@ -204,7 +296,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
                   <button
                     key={c.id || c.email}
                     className={`course-box ${selectedContact?.email === c.email ? "active-msg" : ""}`}
-                    onClick={() => setSelectedContact(c)}
+                    onClick={() => openContact(c)}
                     style={{
                       width: "100%",
                       textAlign: "left",
@@ -216,8 +308,29 @@ export default function Messages({ currentUser = {}, users = [] }) {
                       background: selectedContact?.email === c.email ? "rgba(37, 99, 235, 0.2)" : "transparent"
                     }}
                   >
-                    <div style={{ fontWeight: "bold", fontSize: "0.9rem", color: "inherit" }}>
-                      {getDisplayName(c)}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                      <div style={{ fontWeight: "bold", fontSize: "0.9rem", color: "inherit" }}>
+                        {getDisplayName(c)}
+                      </div>
+                      {incoming.some((note) => note.senderId === c.id) && (
+                        <span
+                          style={{
+                            minWidth: "22px",
+                            height: "22px",
+                            padding: "0 6px",
+                            borderRadius: "11px",
+                            background: "#ff8c00",
+                            color: "#111",
+                            fontSize: "12px",
+                            fontWeight: "bold",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center"
+                          }}
+                        >
+                          {incoming.find((note) => note.senderId === c.id).count}
+                        </span>
+                      )}
                     </div>
                     <div style={{ fontSize: "11px", opacity: 0.7, textTransform: "uppercase", marginTop: "2px", color: "inherit" }}>
                       {c.role}
@@ -231,6 +344,34 @@ export default function Messages({ currentUser = {}, users = [] }) {
 
         {/* Main: Chat Window */}
         <div className="messages-chat-panel" style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+          {incoming.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "10px" }}>
+              {incoming.map((note) => (
+                <button
+                  key={note.id}
+                  type="button"
+                  onClick={() => {
+                    const person = users.find((u) => u.id === note.senderId);
+                    if (person) openContact(person);
+                  }}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #10b981",
+                    background: "rgba(16, 185, 129, 0.15)",
+                    color: "inherit",
+                    cursor: "pointer"
+                  }}
+                >
+                  <strong>New message from {note.senderName}</strong>
+                  {note.preview && (
+                    <div style={{ fontSize: "0.85rem", marginTop: "4px", opacity: 0.85 }}>{note.preview}</div>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
           {selectedContact ? (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
