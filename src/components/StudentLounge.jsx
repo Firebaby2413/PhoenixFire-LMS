@@ -1,26 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { getDisplayName } from '../utils/academySettings';
-import { isHttpUrl } from '../utils/liveClasses';
+import LoungeVoice from './LoungeVoice';
 import {
   LOUNGE_STORAGE_KEY,
   addLocalLounge,
   addLocalMessage,
-  addLocalRoom,
-  closeLocalRoom,
   closeLoungeChannel,
-  closeLoungeRoom,
   createLounge,
   deleteLounge,
   fetchLoungeMessages,
-  fetchLoungeRooms,
   fetchLounges,
   joinLoungePresence,
-  openLoungeRoom,
   readLocalLounge,
   removeLocalLounge,
   sendLoungeMessage,
   subscribeLoungeMessages,
-  subscribeLoungeRooms,
   subscribeLounges
 } from '../utils/loungeService';
 
@@ -44,7 +38,6 @@ export default function StudentLounge({ currentUser }) {
   const [lounges, setLounges] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [messages, setMessages] = useState([]);
-  const [rooms, setRooms] = useState([]);
   const [present, setPresent] = useState([]);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -52,9 +45,6 @@ export default function StudentLounge({ currentUser }) {
   const [loungeName, setLoungeName] = useState('');
   const [loungeDescription, setLoungeDescription] = useState('');
   const [msgText, setMsgText] = useState('');
-  const [roomTitle, setRoomTitle] = useState('');
-  const [roomUrl, setRoomUrl] = useState('');
-  const [roomNote, setRoomNote] = useState('');
   const threadRef = useRef(null);
 
   const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
@@ -105,7 +95,6 @@ export default function StudentLounge({ currentUser }) {
       const applyLocal = () => {
         const store = readLocalLounge();
         setMessages(store.messages.filter((item) => item.loungeId === selectedId));
-        setRooms(store.rooms.filter((item) => item.loungeId === selectedId && item.status !== 'closed'));
       };
       applyLocal();
       const onStorage = (event) => {
@@ -116,29 +105,20 @@ export default function StudentLounge({ currentUser }) {
     }
 
     const load = async () => {
-      const [messageResult, roomResult] = await Promise.all([
-        fetchLoungeMessages(selectedId),
-        fetchLoungeRooms(selectedId)
-      ]);
+      const messageResult = await fetchLoungeMessages(selectedId);
       if (cancelled) return;
       if (messageResult.ok) setMessages(messageResult.rows);
       else setError(messageResult.message);
-      if (roomResult.ok) setRooms(roomResult.rows);
-      else setError(roomResult.message);
     };
 
     load();
     const messageChannel = subscribeLoungeMessages(selectedId, (rows) => {
       if (!cancelled) setMessages(rows);
     });
-    const roomChannel = subscribeLoungeRooms(selectedId, (rows) => {
-      if (!cancelled) setRooms(rows);
-    });
 
     return () => {
       cancelled = true;
       closeLoungeChannel(messageChannel);
-      closeLoungeChannel(roomChannel);
     };
   }, [selectedId, mode]);
 
@@ -193,7 +173,7 @@ export default function StudentLounge({ currentUser }) {
 
   const handleRemoveLounge = async () => {
     if (!selected) return;
-    if (!window.confirm(`Remove ${selected.name}? The chat and meeting links in it are removed too.`)) return;
+    if (!window.confirm(`Remove ${selected.name}? The chat in it is removed too.`)) return;
     setError('');
 
     if (mode === 'local') {
@@ -239,59 +219,6 @@ export default function StudentLounge({ currentUser }) {
       return;
     }
     setMsgText('');
-  };
-
-  const handleOpenRoom = async (event) => {
-    event.preventDefault();
-    const title = roomTitle.trim();
-    const meetingUrl = roomUrl.trim();
-    if (!title || !selectedId) {
-      setError('Name the remote room.');
-      return;
-    }
-    if (!isHttpUrl(meetingUrl)) {
-      setError('Meeting link must start with http:// or https://.');
-      return;
-    }
-    setError('');
-    const draft = {
-      loungeId: selectedId,
-      title,
-      note: roomNote.trim(),
-      meetingUrl,
-      hostId: currentUser?.id || null,
-      hostName: getDisplayName(currentUser)
-    };
-
-    if (mode === 'local') {
-      addLocalRoom(draft);
-      setRooms(readLocalLounge().rooms.filter((item) => item.loungeId === selectedId && item.status !== 'closed'));
-      setRoomTitle('');
-      setRoomUrl('');
-      setRoomNote('');
-      return;
-    }
-
-    setPending(true);
-    const result = await openLoungeRoom(draft, currentUser);
-    setPending(false);
-    if (!result.ok) {
-      setError(result.message);
-      return;
-    }
-    setRoomTitle('');
-    setRoomUrl('');
-    setRoomNote('');
-  };
-
-  const handleCloseRoom = async (room) => {
-    setError('');
-    if (mode === 'local') {
-      setRooms(closeLocalRoom(room.id).filter((item) => item.loungeId === selectedId));
-      return;
-    }
-    const result = await closeLoungeRoom(room.id);
-    if (!result.ok) setError(result.message);
   };
 
   const you = personKey(currentUser);
@@ -403,54 +330,7 @@ export default function StudentLounge({ currentUser }) {
                   </form>
                 </section>
 
-                <aside className="card lounge-panel">
-                  <h3>Connect remotely</h3>
-                  <div className="lounge-scroll">
-                    <p className="lounge-help">
-                      Paste a Zoom, Meet, or Teams link. Everyone in this lounge can join it.
-                    </p>
-                    {rooms.length === 0 && <p className="live-class-empty">No open meeting links.</p>}
-                    {rooms.map((room) => {
-                      const canClose = isAdmin || room.hostId === currentUser?.id;
-                      return (
-                        <article key={room.id} className="lounge-room">
-                          <h4>{room.title}</h4>
-                          <p>{room.hostName}</p>
-                          {room.note && <p>{room.note}</p>}
-                          <a className="btn" href={room.meetingUrl} target="_blank" rel="noopener noreferrer">
-                            Join
-                          </a>
-                          {canClose && (
-                            <button type="button" className="btn-secondary" onClick={() => handleCloseRoom(room)}>
-                              Close
-                            </button>
-                          )}
-                        </article>
-                      );
-                    })}
-                  </div>
-                  <form onSubmit={handleOpenRoom} className="lounge-create">
-                    <input
-                      className="input-wide"
-                      placeholder="Room name"
-                      value={roomTitle}
-                      onChange={(event) => setRoomTitle(event.target.value)}
-                    />
-                    <input
-                      className="input-wide"
-                      placeholder="https:// meeting link"
-                      value={roomUrl}
-                      onChange={(event) => setRoomUrl(event.target.value)}
-                    />
-                    <input
-                      className="input-wide"
-                      placeholder="Note (optional)"
-                      value={roomNote}
-                      onChange={(event) => setRoomNote(event.target.value)}
-                    />
-                    <button className="btn" type="submit" disabled={pending}>Open room</button>
-                  </form>
-                </aside>
+                <LoungeVoice key={selected.id} loungeId={selected.id} currentUser={currentUser} />
               </div>
             </>
           )}

@@ -32,7 +32,7 @@ function defaultLounge() {
   return {
     id: crypto.randomUUID(),
     name: 'Student Lounge',
-    description: 'Drop in, see who is here, and open a meeting link when you want to connect live.',
+    description: 'Drop in, see who is here, and join voice when you want to talk.',
     createdBy: null,
     createdAt: new Date().toISOString()
   };
@@ -130,11 +130,16 @@ function explain(error, label) {
   return error?.message || `Could not save this to ${label}.`;
 }
 
+const OLD_LOUNGE_DESCRIPTION = 'Drop in, see who is here, and open a meeting link when you want to connect live.';
+
 export function loungeFromRow(row) {
+  const description = row.description === OLD_LOUNGE_DESCRIPTION
+    ? 'Drop in, see who is here, and join voice when you want to talk.'
+    : (row.description || '');
   return {
     id: row.id,
     name: row.name || '',
-    description: row.description || '',
+    description,
     createdBy: row.created_by || null,
     createdAt: row.created_at
   };

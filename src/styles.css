@@ -1639,7 +1639,7 @@ a.btn-secondary {
 
 .lounge-panels {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) 250px;
+  grid-template-columns: 180px minmax(0, 1fr) 280px;
   gap: 12px;
   flex: 1;
   min-height: 0;
@@ -1723,6 +1723,62 @@ a.btn-secondary {
 .lounge-composer .btn {
   width: auto;
   margin-top: 8px;
+}
+
+.lounge-voice > .btn,
+.lounge-voice-actions .btn,
+.lounge-voice-actions .btn-secondary {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.lounge-voice-actions {
+  display: flex;
+  flex-direction: column;
+}
+
+.lounge-voice-member {
+  margin-bottom: 12px;
+}
+
+.lounge-voice-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px 0;
+}
+
+.lounge-voice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #22c55e;
+  flex: 0 0 auto;
+}
+
+.lounge-voice-dot.is-muted {
+  background: #64748b;
+}
+
+.lounge-voice-status {
+  margin: 0 0 6px 0;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.lounge-video {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 8px;
+  background: #0b1220;
+}
+
+.lounge-voice audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
 }
 
 @media (max-width: 980px) {
