@@ -74,6 +74,8 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   const [peers, setPeers] = useState([]);
   const [localStream, setLocalStream] = useState(null);
   const [voiceError, setVoiceError] = useState('');
+  const [voiceListOpen, setVoiceListOpen] = useState(true);
+  const [unseenJoins, setUnseenJoins] = useState(0);
 
   const channelRef = useRef(null);
   const peersRef = useRef(new Map());
@@ -86,6 +88,9 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   const cameraRef = useRef(false);
   const handlersRef = useRef({});
   const dropCallRef = useRef(() => {});
+  const voiceListOpenRef = useRef(true);
+  const seenVoiceIds = useRef(new Set());
+  const voiceListPrimed = useRef(false);
 
   nameRef.current = getDisplayName(currentUser);
   mutedRef.current = muted;
@@ -464,53 +469,107 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     }
   };
 
+  useEffect(() => {
+    voiceListOpenRef.current = voiceListOpen;
+    if (voiceListOpen) setUnseenJoins(0);
+  }, [voiceListOpen]);
+
+  useEffect(() => {
+    if (!voiceListPrimed.current) {
+      members.forEach((member) => seenVoiceIds.current.add(member.id));
+      if (members.length > 0) voiceListPrimed.current = true;
+      return;
+    }
+
+    let joins = 0;
+    const liveIds = new Set(members.map((member) => member.id));
+    members.forEach((member) => {
+      if (seenVoiceIds.current.has(member.id)) return;
+      seenVoiceIds.current.add(member.id);
+      if (!voiceListOpenRef.current && !member.self) joins += 1;
+    });
+    seenVoiceIds.current.forEach((id) => {
+      if (!liveIds.has(id)) seenVoiceIds.current.delete(id);
+    });
+    if (joins) setUnseenJoins((count) => count + joins);
+  }, [members]);
+
+  const tiles = members.map((member) => {
+    const peer = peers.find((item) => item.id === member.id);
+    const isMuted = member.self ? muted : member.muted;
+    const showVideo = member.self ? cameraOn : Boolean(peer?.cameraOn);
+    const stream = member.self ? localStream : peer?.stream;
+    return { member, peer, isMuted, showVideo, stream }
+  });
+
   return (
     <aside className="card lounge-panel lounge-voice">
-      <h3>Voice</h3>
-      <div className="lounge-scroll">
-        <p className="lounge-help">
-          Join this channel to talk. It stays inside the lounge, so nobody needs a meeting link.
-        </p>
-        {voiceError && <p className="live-class-error">{voiceError}</p>}
-        {members.length === 0 && <p className="live-class-empty">Nobody is in voice yet.</p>}
-        {members.map((member) => {
-          const peer = peers.find((item) => item.id === member.id);
-          const isMuted = member.self ? muted : member.muted;
-          const showVideo = member.self ? cameraOn : peer?.cameraOn;
-          const stream = member.self ? localStream : peer?.stream;
-          return (
-            <article key={member.id} className="lounge-voice-member">
-              <p className="lounge-voice-name">
+      <div className='lounge-stage'>
+        <div className='lounge-stage-videos'>
+          {voiceError && <p className='live-class-error'>{voiceError}</p>}
+          {tiles.length === 0 && (
+            <div className='lounge-stage-card'>
+              <p>Nobody is in voice yet.</p>
+            </div>
+          )}
+          {tiles.map(({ member, peer, isMuted, showVideo, stream }) => (
+            <article key={member.id} className='lounge-stage-card'>
+              <p className='lounge-voice-name'>
                 <span className={`lounge-voice-dot ${isMuted ? 'is-muted' : ''}`} />
                 <strong>{member.self ? 'You' : member.name}</strong>
-                <span className="lounge-role">{isMuted ? 'Muted' : 'Live'}</span>
+                <span className='lounge-role'>{isMuted ? 'Muted' : 'Live'}</span>
               </p>
               {joined && !member.self && peer && peer.connection !== 'connected' && (
-                <p className="lounge-voice-status">Connecting…</p>
+                <p className='lounge-voice-status'>Connecting...</p>
               )}
               {stream && <MediaTile stream={stream} video={showVideo} hear={!member.self} />}
             </article>
-          );
-        })}
-      </div>
-      {!joined && (
-        <button className="btn" type="button" onClick={join} disabled={!ready || joining || !selfId}>
-          {joining ? 'Joining…' : 'Join voice'}
-        </button>
-      )}
-      {joined && (
-        <div className="lounge-voice-actions">
-          <button className="btn-secondary" type="button" onClick={toggleMute}>
-            {muted ? 'Unmute' : 'Mute'}
-          </button>
-          <button className="btn-secondary" type="button" onClick={toggleCamera}>
-            {cameraOn ? 'Camera off' : 'Camera on'}
-          </button>
-          <button className="btn" type="button" onClick={leave}>
-            Leave voice
-          </button>
+          ))}
         </div>
-      )}
+
+        {!joined && (
+          <button className='btn' type='button' onClick={join} disabled={!ready || joining || !selfId}>
+            {joining ? 'Joining...' : 'Join voice'}
+          </button>
+        )}
+        {joined && (
+          <div className='lounge-voice-actions'>
+            <button className='btn-secondary' type='button' onClick={toggleMute}>
+              {muted ? 'Unmute' : 'Mute'}
+            </button>
+            <button className='btn-secondary' type='button' onClick={toggleCamera}>
+              {cameraOn ? 'Camera off' : 'Camera on'}
+            </button>
+            <button className='btn' type='button' onClick={leave}>
+              Leave voice
+            </button>
+          </div>
+        )}
+      </div>
+
+      <section className={`lounge-voice-list ${voiceListOpen ? '' : 'is-collapsed'}`}>
+        <button
+          type='button'
+          className='lounge-drawer-toggle'
+          onClick={() => {
+            setVoiceListOpen((open) => !open);
+            setUnseenJoins(0);
+          }}
+        >
+          <span>In voice</span>
+          <span>
+            {unseenJoins > 0 && <span className='lounge-badge'>{unseenJoins}</span>}
+            {voiceListOpen ? 'Hide' : 'Show'}
+          </span>
+        </button>
+        {voiceListOpen && (
+          <div className='lounge-voice-names'>
+            {members.map((member) => (
+              <span key={member.id}>{member.self ? 'You' : member.name}</span>
+            ))}
+          </div>
+        )}
+      </section>
     </aside>
   );
 }

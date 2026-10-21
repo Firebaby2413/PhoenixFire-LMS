@@ -45,7 +45,61 @@ export default function StudentLounge({ currentUser }) {
   const [loungeName, setLoungeName] = useState('');
   const [loungeDescription, setLoungeDescription] = useState('');
   const [msgText, setMsgText] = useState('');
+  const [chatOpen, setChatOpen] = useState(true);
+  const [peopleOpen, setPeopleOpen] = useState(true);
+  const [unseenChats, setUnseenChats] = useState(0);
+  const [unseenPeople, setUnseenPeople] = useState(0);
+  const chatOpenRef = useRef(true);
+  const peopleOpenRef = useRef(true);
+  const seenMessageIds = useRef(new Set());
+  const seenPeopleIds = useRef(new Set());
+  const primedLoungeId = useRef(null);
   const threadRef = useRef(null);
+  const you = personKey(currentUser);
+
+  useEffect(() => {
+    chatOpenRef.current = chatOpen;
+    peopleOpenRef.current = peopleOpen;
+  }, [chatOpen, peopleOpen]);
+
+  useEffect(() => {
+    primedLoungeId.current = null;
+    seenMessageIds.current = new Set();
+    seenPeopleIds.current = new Set();
+    setUnseenChats(0);
+    setUnseenPeople(0);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+
+    if (primedLoungeId.current !== selectedId) {
+      messages.forEach((message) => seenMessageIds.current.add(message.id));
+      present.forEach((person) => seenPeopleIds.current.add(person.id));
+      if (messages.length > 0 || present.length > 0) primedLoungeId.current = selectedId;
+      return;
+    }
+
+    let chats = 0;
+    messages.forEach((message) => {
+      if (seenMessageIds.current.has(message.id)) return;
+      seenMessageIds.current.add(message.id);
+      if (!chatOpenRef.current && message.senderId !== currentUser?.id) chats += 1;
+    });
+    if (chats) setUnseenChats((count) => count + chats);
+
+    let arrived = 0;
+    const liveIds = new Set(present.map((person) => person.id));
+    present.forEach((person) => {
+      if (seenPeopleIds.current.has(person.id)) return;
+      seenPeopleIds.current.add(person.id);
+      if (!peopleOpenRef.current && person.id !== you) arrived += 1;
+    });
+    seenPeopleIds.current.forEach((id) => {
+      if (!liveIds.has(id)) seenPeopleIds.current.delete(id);
+    });
+    if (arrived) setUnseenPeople((count) => count + arrived);
+  }, [messages, present, selectedId, currentUser?.id, you]);
 
   const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
   const selected = lounges.find((lounge) => lounge.id === selectedId) || null;
@@ -221,8 +275,6 @@ export default function StudentLounge({ currentUser }) {
     setMsgText('');
   };
 
-  const you = personKey(currentUser);
-
   return (
     <div className="section-container lounge-page">
       {notice && <p className="live-class-banner">{notice}</p>}
@@ -282,55 +334,89 @@ export default function StudentLounge({ currentUser }) {
                 )}
               </header>
 
-              <div className="lounge-panels">
-                <aside className="card lounge-panel">
-                  <h3>Here now</h3>
-                  <div className="lounge-scroll">
-                    {present.length === 0 && (
-                      <p className="live-class-empty">Classmates show up here when they open this lounge.</p>
-                    )}
-                    {present.map((person) => (
-                      <p key={person.id} className="lounge-person">
-                        <span>{person.name}</span>
-                        <span className="lounge-role">
-                          {person.id === you ? 'You' : person.role}
-                        </span>
-                      </p>
-                    ))}
-                  </div>
-                </aside>
-
-                <section className="card lounge-panel lounge-chat">
-                  <h3>Chat</h3>
-                  <div className="lounge-scroll" ref={threadRef}>
-                    {messages.length === 0 && (
-                      <p className="live-class-empty">Say hello. This chat stays with this lounge.</p>
-                    )}
-                    {messages.map((message) => (
-                      <article
-                        key={message.id}
-                        className={`lounge-message ${message.senderId === currentUser?.id ? 'is-mine' : ''}`}
-                      >
-                        <header>
-                          <strong>{message.senderName}</strong>
-                          <span>{formatWhen(message.createdAt)}</span>
-                        </header>
-                        <p>{message.body}</p>
-                      </article>
-                    ))}
-                  </div>
-                  <form className="lounge-composer" onSubmit={handleSend}>
-                    <input
-                      className="input-wide"
-                      placeholder={`Message ${selected.name}`}
-                      value={msgText}
-                      onChange={(event) => setMsgText(event.target.value)}
-                    />
-                    <button className="btn" type="submit" disabled={pending}>Send</button>
-                  </form>
-                </section>
-
+              <div className='lounge-panels'>
                 <LoungeVoice key={selected.id} loungeId={selected.id} currentUser={currentUser} />
+
+                <div className='lounge-side'>
+                  <aside className={`card lounge-panel lounge-drawer ${peopleOpen ? '' : 'is-collapsed'}`}>
+                    <button
+                      type='button'
+                      className='lounge-drawer-toggle'
+                      onClick={() => {
+                        setPeopleOpen((open) => !open);
+                        setUnseenPeople(0);
+                      }}
+                    >
+                      <span>Here now</span>
+                      <span>
+                        {unseenPeople > 0 && <span className='lounge-badge'>{unseenPeople}</span>}
+                        {peopleOpen ? 'Hide' : 'Show'}
+                      </span>
+                    </button>
+                    {peopleOpen && (
+                      <div className='lounge-scroll'>
+                        {present.length === 0 && (
+                          <p className='live-class-empty'>Classmates show up here when they open this lounge.</p>
+                        )}
+                        {present.map((person) => (
+                          <p key={person.id} className='lounge-person'>
+                            <span>{person.name}</span>
+                            <span className='lounge-role'>
+                              {person.id === you ? 'You' : person.role}
+                            </span>
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </aside>
+
+                  <section className={`card lounge-panel lounge-chat lounge-drawer ${chatOpen ? '' : 'is-collapsed'}`}>
+                    <button
+                      type='button'
+                      className='lounge-drawer-toggle'
+                      onClick={() => {
+                        setChatOpen((open) => !open);
+                        setUnseenChats(0);
+                      }}
+                    >
+                      <span>Chat</span>
+                      <span>
+                        {unseenChats > 0 && <span className='lounge-badge'>{unseenChats}</span>}
+                        {chatOpen ? 'Hide' : 'Show'}
+                      </span>
+                    </button>
+                    {chatOpen && (
+                      <>
+                        <div className='lounge-scroll' ref={threadRef}>
+                          {messages.length === 0 && (
+                            <p className='live-class-empty'>Say hello. This chat stays in this lounge.</p>
+                          )}
+                          {messages.map((message) => (
+                            <article
+                              key={message.id}
+                              className={`lounge-message ${message.senderId === currentUser?.id ? 'is-mine' : ''}`}
+                            >
+                              <header>
+                                <strong>{message.senderName}</strong>
+                                <span>{formatWhen(message.createdAt)}</span>
+                              </header>
+                              <p>{message.body}</p>
+                            </article>
+                          ))}
+                        </div>
+                        <form className='lounge-composer' onSubmit={handleSend}>
+                          <input
+                            className='input-wide'
+                            placeholder={`Message ${selected.name}`}
+                            value={msgText}
+                            onChange={(event) => setMsgText(event.target.value)}
+                          />
+                          <button className='btn' type='submit' disabled={pending}>Send</button>
+                        </form>
+                      </>
+                    )}
+                  </section>
+                </div>
               </div>
             </>
           )}
