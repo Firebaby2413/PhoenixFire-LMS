@@ -118,9 +118,16 @@ begin
       )
     );
 
-  delete from public.certificates
-  where student_id::text = req.student_id
-    and certificate_key = any(certificate_keys);
+  -- The live certificates table was created before certificate_key existed.
+  -- Add it here so this delete does not abort the whole restart.
+  if to_regclass('public.certificates') is not null then
+    execute 'alter table public.certificates add column if not exists certificate_key text';
+    execute
+      'delete from public.certificates
+       where student_id::text = $1
+         and certificate_key = any($2)'
+      using req.student_id, certificate_keys;
+  end if;
 
   update public.course_restart_requests
   set status = 'approved',
