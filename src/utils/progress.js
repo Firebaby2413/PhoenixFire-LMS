@@ -365,6 +365,12 @@ export function courseCertificateId(course) {
   return `course:${course?.id || course?.title || 'course'}`;
 }
 
+export function isFreshCertificate(earnedOn, resetAt) {
+  if (!resetAt) return true;
+  if (!earnedOn) return false;
+  return new Date(earnedOn).getTime() > resetAt;
+}
+
 export function stampCertificateDate(student, certificateId) {
   const id = String(certificateId);
   const existing = readLocalProgressMap('certificate_dates', student);

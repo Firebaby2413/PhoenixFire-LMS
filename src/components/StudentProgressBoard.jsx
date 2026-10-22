@@ -1,8 +1,8 @@
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase, fetchAllSubmissions } from '../utils/storage';
 import { isReadingModule } from '../utils/moduleTypes';
-import { applyRemoteModuleProgress, calculateCourseProgressDetailed, findSubmission, getCourseOutline, getEarnedCertificates, stampEarnedCertificates, writeLocalProgressFlag } from '../utils/progress';
-import { currentProgressEpoch, wipeStoredCourseProgress, listRestartRequests } from '../utils/courseRestart';
+import { applyRemoteModuleProgress, calculateCourseProgressDetailed, clearLocalCourseProgress, findSubmission, getCourseModules, getCourseOutline, getEarnedCertificates, isFreshCertificate, removeLocalProgressFlag, writeLocalProgressFlag } from '../utils/progress';
+import { certificateKeysForCourse, currentProgressEpoch, listRestartRequests } from '../utils/courseRestart';
 import RestartCourseButton from './RestartCourseButton';
 import RestartRequests from './RestartRequests';
 import { claimOrphanSubmissions, reassignOrphanSubmissions } from '../utils/storage';
@@ -23,21 +23,81 @@ export default function StudentProgressBoard({ courses = [], users = [], current
   const [feedbackForms, setFeedbackForms] = useState({});
   const [certificateStamp, setCertificateStamp] = useState(0);
   const [progressStamp, setProgressStamp] = useState(0);
+  const [restartTimes, setRestartTimes] = useState({});
 
   useEffect(() => {
     if (!currentUser?.id) return;
-    supabase
-      .from('certificates')
-      .select('certificate_key, awarded_at')
-      .eq('student_id', currentUser.id)
-      .then(({ data, error }) => {
-        if (error || !Array.isArray(data)) return;
-        data.forEach((row) => {
-          writeLocalProgressFlag('certificate_dates', currentUser, row.certificate_key, row.awarded_at);
+    let cancelled = false;
+
+    async function loadCertificates() {
+      const [certResult, resetResult, progressResult] = await Promise.all([
+        supabase
+          .from('certificates')
+          .select('certificate_key, awarded_at')
+          .eq('student_id', currentUser.id),
+        listRestartRequests({ studentId: currentUser.id, status: 'approved' }).catch(() => []),
+        supabase
+          .from('module_progress')
+          .select('module_id, updated_at')
+          .eq('student_id', currentUser.id)
+      ]);
+      if (cancelled) return;
+
+      const resets = Array.isArray(resetResult) ? resetResult : [];
+      const progressRows = Array.isArray(progressResult.data) ? progressResult.data : [];
+      const restartedCourses = new Map();
+
+      resets.forEach((reset) => {
+        const course = (courses || []).find((item) => String(item.id) === String(reset.course_id));
+        if (!course) return;
+        const resetAt = new Date(reset.reviewed_at || reset.created_at || 0).getTime();
+        const moduleIds = new Set(getCourseModules(course).map((mod) => String(mod.id)));
+        const hasNewProgress = progressRows.some((row) => {
+          return moduleIds.has(String(row.module_id))
+            && new Date(row.updated_at || 0).getTime() > resetAt;
         });
-        setCertificateStamp(Date.now());
+        const previous = restartedCourses.get(String(course.id));
+        if (!previous || resetAt > previous.resetAt) {
+          restartedCourses.set(String(course.id), { course, resetAt, hasNewProgress });
+        }
+        if (!hasNewProgress) {
+          certificateKeysForCourse(course).forEach((key) => {
+            removeLocalProgressFlag('certificate_dates', currentUser, key);
+            supabase
+              .from('certificates')
+              .delete()
+              .eq('student_id', currentUser.id)
+              .eq('certificate_key', key);
+          });
+        }
       });
-  }, [currentUser]);
+
+      if (!certResult.error && Array.isArray(certResult.data)) {
+        certResult.data.forEach((row) => {
+          const key = String(row.certificate_key || '');
+          const restarted = [...restartedCourses.values()].find((entry) =>
+            certificateKeysForCourse(entry.course).includes(key)
+          );
+          if (restarted && (!restarted.hasNewProgress || !isFreshCertificate(row.awarded_at, restarted.resetAt))) {
+            removeLocalProgressFlag('certificate_dates', currentUser, key);
+            supabase
+              .from('certificates')
+              .delete()
+              .eq('student_id', currentUser.id)
+              .eq('certificate_key', key);
+            return;
+          }
+          writeLocalProgressFlag('certificate_dates', currentUser, key, row.awarded_at);
+        });
+      }
+      if (!cancelled) setCertificateStamp(Date.now());
+    }
+
+    loadCertificates();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, courses]);
 
   // Role helpers
   const userRole = String(currentUser?.role || '').trim().toLowerCase();
@@ -63,77 +123,64 @@ export default function StudentProgressBoard({ courses = [], users = [], current
   useEffect(() => {
     let cancelled = false;
     const epochAtStart = currentProgressEpoch();
-    supabase
-      .from('module_progress')
-      .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result')
-      .then(({ data, error }) => {
-        if (cancelled || error || !Array.isArray(data)) return;
-        if (epochAtStart !== currentProgressEpoch()) return;
-        applyRemoteModuleProgress(data);
-        setProgressStamp(Date.now());
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [users]);
 
-  useEffect(() => {
-    if (userRole !== 'admin' || !courses.length) return undefined;
-    let cancelled = false;
-    const storageKey = 'repaired_course_restarts_v2';
-    (async () => {
-      let rows = [];
-      try {
-        rows = await listRestartRequests({ status: 'approved' });
-      } catch (err) {
-        console.error(err);
-        return;
-      }
-      if (cancelled) return;
-      let done = [];
-      try {
-        done = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      } catch {
-        done = [];
-      }
-      const seen = new Set(done);
-      let changed = false;
-      for (const row of rows) {
-        if (seen.has(row.id)) continue;
-        const course = courses.find((item) => String(item.id) === String(row.course_id));
-        if (!course) continue;
-        const student = (users || []).find((user) => String(user.id) === String(row.student_id)) || {
-          id: row.student_id,
-          email: row.student_email
+    async function loadProgress() {
+      const progressResult = await supabase
+        .from('module_progress')
+        .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result, updated_at');
+      if (cancelled || progressResult.error || !Array.isArray(progressResult.data)) return;
+      if (epochAtStart !== currentProgressEpoch()) return;
+
+      const resetResult = await listRestartRequests({ status: 'approved' });
+      const resets = Array.isArray(resetResult) ? resetResult : [];
+      const times = {};
+      resets.forEach((reset) => {
+        const courseId = String(reset.course_id || '');
+        if (!courseId) return;
+        const resetAt = new Date(reset.reviewed_at || reset.created_at || 0).getTime();
+        times[courseId] = Math.max(times[courseId] || 0, resetAt);
+      });
+      if (!cancelled) setRestartTimes(times);
+      let rows = progressResult.data;
+
+      resets.forEach((reset) => {
+        const course = courses.find((item) => String(item.id) === String(reset.course_id));
+        if (!course) return;
+        const student = (users || []).find((user) => String(user.id) === String(reset.student_id)) || {
+          id: reset.student_id,
+          email: reset.student_email
         };
-        const moduleIds = (course.lessons || [])
-          .flatMap((lesson) => lesson.modules || [])
-          .map((mod) => String(mod.id))
-          .filter(Boolean);
-        await supabase.rpc('approve_course_restart', {
-          request_id: row.id,
-          module_ids: moduleIds,
-          certificate_keys: [
-            ...(course.lessons || []).map((lesson) => `lesson:${course.id}:${lesson.id}`),
-            `course:${course.id}`
-          ]
+        clearLocalCourseProgress(student, course);
+
+        const moduleIds = new Set(
+          (course.lessons || []).flatMap((lesson) => (lesson.modules || []).map((mod) => String(mod.id)))
+        );
+        const resetAt = new Date(reset.reviewed_at || reset.created_at || 0).getTime();
+        const studentIds = new Set(
+          [reset.student_id, reset.student_email, student.id, student.email, student.studentId]
+            .filter(Boolean)
+            .map((value) => String(value).toLowerCase())
+        );
+
+        rows = rows.filter((row) => {
+          const sameStudent = studentIds.has(String(row.student_id || '').toLowerCase());
+          const sameModule = moduleIds.has(String(row.module_id));
+          if (!sameStudent || !sameModule) return true;
+          const savedAt = new Date(row.updated_at || 0).getTime();
+          return savedAt > resetAt;
         });
-        await wipeStoredCourseProgress(student, course);
-        seen.add(row.id);
-        changed = true;
-      }
-      if (changed) {
-        localStorage.setItem(storageKey, JSON.stringify([...seen]));
-        if (!cancelled) {
-          setProgressStamp(Date.now());
-          loadSubmissions();
-        }
-      }
-    })();
+      }); 
+
+      if (cancelled || epochAtStart !== currentProgressEpoch()) return;
+      applyRemoteModuleProgress(rows);
+      setProgressStamp(Date.now());
+    }
+
+    loadProgress();
     return () => {
       cancelled = true;
     };
-  }, [userRole, courses, users, loadSubmissions]);
+  }, [users, courses]);
 
   const studentUsers = useMemo(() => {
     if (!Array.isArray(users)) return [];
@@ -368,12 +415,16 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                   </div>
 
                   {(() => {
-                    const earned = stampEarnedCertificates(
-                      student,
-                      getEarnedCertificates(course, student, ownedSubmissions)
+                    const earned = getEarnedCertificates(course, student, ownedSubmissions);
+                    const resetAt = restartTimes[String(course.id)] || 0;
+                    const visibleLessons = earned.lessons.filter((cert) =>
+                      isFreshCertificate(cert.earnedOn, resetAt)
                     );
+                    const visibleCourse = earned.course && isFreshCertificate(earned.course.earnedOn, resetAt)
+                      ? earned.course
+                      : null;
                     const academyName = getAcademySettings().academyName;
-                    const hasCertificate = earned.lessons.length > 0 || earned.course;
+                    const hasCertificate = visibleLessons.length > 0 || visibleCourse;
 
                     if (!hasCertificate && !(isStudentView && percent > 0)) return null;
 
@@ -382,7 +433,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                         <h4 className='certificate-shelf-title'>Certificates</h4>
                         {hasCertificate ? (
                           <div className='certificate-shelf-grid'>
-                            {earned.lessons.map((cert) => (
+                            {visibleLessons.map((cert) => (
                               <CertificateCard
                                 key={cert.id}
                                 kind='lesson'
@@ -393,14 +444,14 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                                 earnedOn={cert.earnedOn}
                               />
                             ))}
-                            {earned.course && (
+                            {visibleCourse && (
                               <CertificateCard
-                                key={earned.course.id}
+                                key={visibleCourse.id}
                                 kind='course'
-                                title={earned.course.title}
+                                title={visibleCourse.title}
                                 studentName={getDisplayName(student)}
                                 academyName={academyName}
-                                earnedOn={earned.course.earnedOn}
+                                earnedOn={visibleCourse.earnedOn}
                               />
                             )}
                           </div>

@@ -63,6 +63,14 @@ create policy restart_admin_update on public.course_restart_requests
   using (public.current_role() = 'admin')
   with check (public.current_role() = 'admin');
 
+drop policy if exists certificates_delete on public.certificates;
+create policy certificates_delete on public.certificates
+  for delete to authenticated
+  using (
+    student_id = auth.uid()
+    or public.current_role() = 'admin'
+  );
+
 drop policy if exists student_flashcards_own on public.student_flashcards;
 create policy student_flashcards_own on public.student_flashcards
   for all to authenticated

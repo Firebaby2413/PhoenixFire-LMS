@@ -4,11 +4,12 @@ import { submitAssignment, fetchAllSubmissions, supabase } from '../utils/storag
 import { isReadingModule, getModuleRepoUrl, getModuleQuizItems, getModuleSteps } from '../utils/moduleTypes';
 import { 
   writeLocalProgressFlag,
+  clearLocalCourseProgress,
   readLocalProgressMap,
   isStatusPassing,
   isStatusFailing,
   getEarnedCertificates,
-  stampEarnedCertificates,
+  isFreshCertificate,
   stampCertificateDate,
   lessonCertificateId
 } from '../utils/progress';
@@ -174,6 +175,10 @@ export default function LessonView({
   const [watchedVideos, setWatchedVideos] = useState({});
   const [finishNotice, setFinishNotice] = useState('');
   const [finishScrollTick, setFinishScrollTick] = useState(0);
+  const [courseResetAt, setCourseResetAt] = useState(0);
+  const [progressReady, setProgressReady] = useState(0);
+  const [certificateStamp, setCertificateStamp] = useState(0);
+  const allowCertificateAwardRef = useRef(false);
   const finishPanelRef = useRef(null);
   const userMovedRef = useRef(false);
   const lastResumedLessonIdRef = useRef(null);
@@ -209,6 +214,7 @@ export default function LessonView({
 
   useEffect(() => {
     let cancelled = false;
+    allowCertificateAwardRef.current = false;
     const lessonIdKey = currentLesson?.id;
 
     if (lastResumedLessonIdRef.current !== lessonIdKey) {
@@ -233,52 +239,84 @@ export default function LessonView({
       }
       if (!currentUser) return;
 
-      const localRead = readLocalProgressMap('read_modules', currentUser);
-      const localWatch = readLocalProgressMap('watched_videos', currentUser);
-      const localQuiz = readLocalProgressMap('quiz_results', currentUser);
-
-      setReadModules((prev) => ({ ...localRead, ...prev }));
-      setWatchedVideos((prev) => ({ ...localWatch, ...prev }));
-      setQuizResults((prev) => ({ ...localQuiz, ...prev}));
-      applyResume(localRead, localWatch, localQuiz);
-
+      let localRead = {};
+      let localWatch = {};
+      let localQuiz = {};
       let supabaseRead = {};
+      let didReadLocal = false;
+      let approvedResetAt = 0;
       if (studentId) {
         try {
-          const { data, error} = await supabase
-            .from('module_progress')
-            .select('module_id, is_read, is_watched, is_submitted, quiz_result')
-            .eq('student_id', String(studentId));
+          const { data: resetRows } = await supabase
+            .from('course_restart_requests')
+            .select('reviewed_at, created_at')
+            .eq('student_id', String(currentUser.id))
+            .eq('course_id', String(course?.id || courseId || ''))
+            .eq('status', 'approved')
+            .order('reviewed_at', { ascending: false })
+            .limit(1);
+          const resetAt = new Date(resetRows?.[0]?.reviewed_at || resetRows?.[0]?.created_at || 0).getTime();
+          if (resetRows?.length) approvedResetAt = resetAt;
+          if (resetRows?.length && course) clearLocalCourseProgress(currentUser, course);
 
-            if (!error && data) {
-              const watched = {};
-              const submitted = {};
-              const quizzes = {};
-              supabaseRead = data.reduce((acc, item) => {
-                const moduleKey = String(item.module_id);
-                if (item.is_read) acc[moduleKey] = true;
-                if (item.is_watched) watched[moduleKey] = true;
-                if (item.is_submitted) submitted[moduleKey] = true;
-                if (item.quiz_result) quizzes[moduleKey] = item.quiz_result;
-                return acc;
-              }, {});
-              if (!cancelled) {
-                setWatchedVideos((prev) => ({ ...watched, ...prev }));
-                setQuizResults((prev) => ({ ...quizzes, ...prev }));
-                Object.entries(submitted).forEach(([moduleKey, value]) => {
-                  writeLocalProgressFlag('submitted_modules', currentUser, moduleKey, value);
-                });
-              }
+          localRead = readLocalProgressMap('read_modules', currentUser);
+          localWatch = readLocalProgressMap('watched_videos', currentUser);
+          localQuiz = readLocalProgressMap('quiz_results', currentUser);
+          didReadLocal = true;
+
+          if (!cancelled) {
+            setReadModules(localRead);
+            setWatchedVideos(localWatch);
+            setQuizResults(localQuiz);
+            applyResume(localRead, localWatch, localQuiz);
+          }
+
+          const { data, error } = await supabase
+            .from('module_progress')
+            .select('module_id, is_read, is_watched, is_submitted, quiz_result, updated_at')
+            .eq('student_id', String(studentId));
+          const kept = (data || []).filter((row) => {
+            if (!resetRows?.length) return true;
+            return new Date(row.updated_at || 0).getTime() > resetAt;
+          });
+
+          if (!error && kept) {
+            const watched = {};
+            const submitted = {};
+            const quizzes = {};
+            supabaseRead = kept.reduce((acc, item) => {
+              const moduleKey = String(item.module_id);
+              if (item.is_read) acc[moduleKey] = true;
+              if (item.is_watched) watched[moduleKey] = true;
+              if (item.is_submitted) submitted[moduleKey] = true;
+              if (item.quiz_result) quizzes[moduleKey] = item.quiz_result;
+              return acc;
+            }, {});
+            if (!cancelled) {
+              setWatchedVideos({ ...localWatch, ...watched });
+              setQuizResults({ ...localQuiz, ...quizzes });
+              Object.entries(submitted).forEach(([moduleKey, value]) => {
+                writeLocalProgressFlag('submitted_modules', currentUser, moduleKey, value);
+              });
             }
+          }
         } catch (err) {
           console.error('Failed to load module progress:', err);
+          if (!didReadLocal) {
+            localRead = readLocalProgressMap('read_modules', currentUser);
+            localWatch = readLocalProgressMap('watched_videos', currentUser);
+            localQuiz = readLocalProgressMap('quiz_results', currentUser);
+          }
         }
       }
 
       if (cancelled) return;
 
       const nextRead = { ...localRead, ...supabaseRead };
-      setReadModules((prev) => ({ ...nextRead, ...prev }));
+      allowCertificateAwardRef.current = false;
+      setCourseResetAt(approvedResetAt);
+      setProgressReady((ready) => ready + 1);
+      setReadModules(nextRead);
       applyResume(nextRead, localWatch, localQuiz);
     }
 
@@ -428,25 +466,33 @@ export default function LessonView({
   }, [lessonSteps, isStepComplete]);
 
   const earnedCertificates = useMemo(() => {
-    return stampEarnedCertificates(
-      currentUser,
-      getEarnedCertificates(course, currentUser, dbSubmissions)
-    );
-  }, [course, currentUser, dbSubmissions, readModules, watchedVideos, quizResults]);
+    return getEarnedCertificates(course, currentUser, dbSubmissions);
+  }, [course, currentUser, dbSubmissions, readModules, watchedVideos, quizResults, certificateStamp]);
 
   const lessonCert = useMemo(() => {
     if (!isLessonComplete || !currentLesson) return null;
     const certId = lessonCertificateId(course, currentLesson);
     const stored = earnedCertificates.lessons.find((cert) => cert.id === certId);
-    if (stored) return stored;
-    return {
-      id: certId,
-      kind: 'lesson',
-      title: currentLesson.title || 'Lesson',
-      courseTitle: course?.title || 'Course',
-      earnedOn: stampCertificateDate(currentUser, certId)
-    };
-  }, [course, currentLesson, currentUser, earnedCertificates.lessons, isLessonComplete]);
+    if (!stored || !isFreshCertificate(stored.earnedOn, courseResetAt)) return null;
+    return stored;
+  }, [course, currentLesson, earnedCertificates.lessons, isLessonComplete, courseResetAt]);
+
+  const courseCert = earnedCertificates.course && isFreshCertificate(earnedCertificates.course.earnedOn, courseResetAt)
+    ? earnedCertificates.course
+    : null;
+
+  useEffect(() => {
+    if (!progressReady) return;
+    if (!isLessonComplete) allowCertificateAwardRef.current = true;
+  }, [progressReady, isLessonComplete]);
+
+  useEffect(() => {
+    if (!progressReady || !allowCertificateAwardRef.current || !isLessonComplete || !currentLesson || !currentUser) return;
+    stampCertificateDate(currentUser, lessonCertificateId(course, currentLesson));
+    const earned = getEarnedCertificates(course, currentUser, dbSubmissions);
+    if (earned.course) stampCertificateDate(currentUser, earned.course.id);
+    setCertificateStamp(Date.now());
+  }, [progressReady, isLessonComplete, currentLesson, currentUser, course, dbSubmissions]);
 
   useEffect(() => {
     if (isLessonComplete) setFinishNotice('');
@@ -906,17 +952,17 @@ export default function LessonView({
                   academyName={getAcademySettings().academyName}
                   earnedOn={lessonCert.earnedOn}
                 />
-                {earnedCertificates.course && (
+                {courseCert && (
                   <CertificateCard
                     kind='course'
-                    title={earnedCertificates.course.title}
+                    title={courseCert.title}
                     studentName={getDisplayName(currentUser)}
                     academyName={getAcademySettings().academyName}
-                    earnedOn={earnedCertificates.course.earnedOn}
+                    earnedOn={courseCert.earnedOn}
                   />
                 )}
                 <p style={{ margin: 0, width: '100%', color: '#9ca3af', fontSize: '14px' }}>
-                  {earnedCertificates.course
+                  {courseCert
                     ? 'You finished this course. Both certificates are saved on your Progress tab.'
                     : nextLesson
                       ? `Next up: ${nextLesson.title}. This certificate is saved on your Progress tab.`
