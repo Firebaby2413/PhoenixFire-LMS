@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { calculateCourseProgressDetailed } from '../utils/progress';
 import { fetchAllSubmissions } from '../utils/storage';
+import RestartCourseButton from './RestartCourseButton';
 import '../styles.css';
 
 export default function CourseList({
@@ -16,7 +17,8 @@ export default function CourseList({
   onEditCourse,
   onDeleteCourse,
   onApproveCourse,
-  onUpdateCourse
+  onUpdateCourse,
+  refreshKey = 0
 }) {
   const safeCourses = Array.isArray(courses) ? courses : [];
 
@@ -232,6 +234,13 @@ export default function CourseList({
               >
                 Open Course
               </button>
+
+              <RestartCourseButton
+                course={course}
+                currentUser={currentUser}
+                users={users}
+                refreshKey={refreshKey}
+              />
 
               {isStaff && (
                 <>

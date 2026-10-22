@@ -351,7 +351,6 @@ export default function Dashboard(props) {
               });
               return {
                 ...mod,
-                completed: isPassed,
                 assignment: mod.assignment ? { ...mod.assignment, submissions: updatedSubs } : mod.assignment,
                 submissions: updatedSubs
               };

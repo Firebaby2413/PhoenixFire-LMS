@@ -183,13 +183,9 @@ export default function Dashboard({ courses, setCourses, currentUser, submission
                       return s;
                     });
 
-                    const isPassed = isStatusPassing(newStatus);
-
                     if (m.assignment) {
                       return {
                         ...m,
-                        completed: isPassed,
-                        isCompleted: isPassed,
                         status: newStatus,
                         assignment: { ...m.assignment, submissions: updatedSubs },
                       };
@@ -197,8 +193,6 @@ export default function Dashboard({ courses, setCourses, currentUser, submission
 
                     return {
                       ...m,
-                      completed: isPassed,
-                      isCompleted: isPassed,
                       status: newStatus,
                       submissions: updatedSubs,
                     };

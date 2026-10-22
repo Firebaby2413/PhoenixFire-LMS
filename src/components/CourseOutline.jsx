@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getCourseOutline } from '../utils/progress';
 import { getLessonFlashcards } from '../utils/moduleTypes';
 import { fetchAllSubmissions } from '../utils/storage';
+import RestartCourseButton from './RestartCourseButton';
 
 const KIND_LABELS = {
   reading: 'Reading',
@@ -13,10 +14,12 @@ const KIND_LABELS = {
 export default function CourseOutline({
   course,
   currentUser,
+  users = [],
   isStaff = false,
   onBack,
   onOpenItem,
-  onOpenFlashcards
+  onOpenFlashcards,
+  refreshKey = 0
 }) {
   const [submissions, setSubmissions] = useState([]);
 
@@ -137,6 +140,13 @@ export default function CourseOutline({
           'Choose a lesson or portion to open. Locked items need earlier work finished first.'}
       </p>
 
+      <RestartCourseButton
+        course={course}
+        currentUser={currentUser}
+        users={users}
+        refreshKey={refreshKey}
+      />
+
       {continueTarget && (
         <button
           type="button"
@@ -243,40 +253,40 @@ export default function CourseOutline({
                 </button>
               ))}
 
-              {getLessonFlashcards(entry.lesson).length > 0 && (
-                <button
-                  type='button'
-                  onClick={() => {
-                    if (!isStaff && !entry.unlocked && !entry.complete) {
-                      alert('Complete the previous lesson first.');
-                      return;
-                    }
-                    onOpenFlashcards({ lessonId: entry.lesson.id });
-                  }}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: '#0f172a',
-                    border: '1px dashed #4338ca',
-                    borderRadius: '8px',
-                    padding: '10px 12px',
-                    color: '#e5e7eb',
-                    cursor: isStaff || entry.unlocked || entry.complete ? 'pointer' : 'not-allowed',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span>
-                    Optional - Flashcard match game
-                    <span style={{ display: 'block', fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
-                      {getLessonFlashcards(entry.lesson).length} pair{getLessonFlashcards(entry.lesson).length === 1 ? '' : 's'} - does not count toward progress
-                    </span>
+              <button
+                type='button'
+                onClick={() => {
+                  if (!isStaff && !entry.unlocked && !entry.complete) {
+                    alert('Complete the previous lesson first.');
+                    return;
+                  }
+                  onOpenFlashcards({ lessonId: entry.lesson.id });
+                }}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: '#0f172a',
+                  border: '1px dashed #4338ca',
+                  borderRadius: '8px',
+                  padding: '10px 12px',
+                  color: '#e5e7eb',
+                  cursor: isStaff || entry.unlocked || entry.complete ? 'pointer' : 'not-allowed',
+                  textAlign: 'left'
+                }}
+              >
+                <span>
+                  Flashcards
+                  <span style={{ display: 'block', fontSize: '12px', color: '#9ca3af', marginTop: '4px' }}>
+                    {getLessonFlashcards(entry.lesson).length} course card{getLessonFlashcards(entry.lesson).length === 1 ? '' : 's'}
+                    {' · '}
+                    add your own on the next screen. Does not count toward progress.
                   </span>
-                  <span style={{ fontSize: '12px', color: '#c7d2fe'}}>
-                    Practice
-                  </span>
-                </button>
-              )}
+                </span>
+                <span style={{ fontSize: '12px', color: '#c7d2fe'}}>
+                  Practice
+                </span>
+              </button>
             </div>
           </div>
         ))}

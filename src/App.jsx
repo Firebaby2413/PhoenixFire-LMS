@@ -24,6 +24,7 @@ import { getAcademySettings, validateAccountKeyRemote } from './utils/academySet
 import { useMessageInbox } from './hooks/useMessageInbox';
 import { profileFromRow } from './utils/profileShape';
 import { loadCourses, saveCourse, uploadCourses } from './utils/courseService';
+import { applyApprovedRestarts } from './utils/courseRestart';
 import phoenixLogo from './assets/Images/phoenix.jpg';
 import './styles.css';
 
@@ -49,7 +50,12 @@ const sanitizeCourses = (rawCourses) => {
               }
               return true;
             })
-            .map((mod) => withModuleClassification(mod)),
+            .map((mod) => {
+              const rest = { ...mod };
+              delete rest.completed;
+              delete rest.isCompleted;
+              return withModuleClassification(rest);
+            }),
         };
       }),
     };
@@ -231,6 +237,7 @@ export default function App() {
   const [resumeStepIndex, setResumeStepIndex] = useState(0);
   const [skipAutoResume, setSkipAutoResume] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
+  const [progressRevision, setProgressRevision] = useState(0);
 
   useEffect(() => {
     document.body.className = theme === 'dark' ? 'dark-theme' : 'light-theme';
@@ -238,6 +245,26 @@ export default function App() {
 
   const activeUser = authUser || localUser;
   const messageInbox = useMessageInbox(activeUser, users);
+
+  useEffect(() => {
+    if (!activeUser || String(activeUser.role || '').toLowerCase() !== 'student') return undefined;
+    let cancelled = false;
+
+    const syncRestart = async () => {
+      if (!courses.length) return;
+      const changed = await applyApprovedRestarts(activeUser, courses);
+      if (!cancelled && changed) setProgressRevision((value) => value + 1);
+    };
+
+    syncRestart();
+    const timer = window.setInterval(syncRestart, 20000);
+    window.addEventListener('focus', syncRestart);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', syncRestart);
+    };
+  }, [activeUser, courses]);
 
   /* --- Auth Handlers --- */
   const handleSignIn = async (email, password) => {
@@ -457,6 +484,7 @@ export default function App() {
                 onDeleteCourse={handleDeleteCourse}
                 onApproveCourse={handleApproveCourse}
                 onSelectCourse={handleCourseSelection}
+                refreshKey={progressRevision}
               />
             )}
 
@@ -527,6 +555,7 @@ export default function App() {
                     }}
                     onApproveCourse={handleApproveCourse}
                     onSelectCourse={handleCourseSelection}
+                    refreshKey={progressRevision}
                   />
                 )}
               </div>
@@ -536,7 +565,9 @@ export default function App() {
               <CourseOutline
                 course={courses.find((c) => c.id === selectedCourseId) || null}
                 currentUser={activeUser}
+                users={users}
                 isStaff={isStaff}
+                refreshKey={progressRevision}
                 onBack={() => setView(isStaff ? 'course-management' : 'courses')}
                 onOpenItem={handleOpenOutlineItem}
                 onOpenFlashcards={handleOpenFlashcards}
@@ -548,15 +579,15 @@ export default function App() {
                 course={courses.find((c) => c.id === selectedCourseId) || null}
                 lesson={(courses.find((c) => c.id === selectedCourseId)?.lessons || []).find(
                   (l) => l.id === activeLessonId
-                ) || null
-              }
-              onBack={() => setView('course-outline')}
+                ) || null}
+                currentUser={activeUser}
+                onBack={() => setView('course-outline')}
               />
             )}
 
             {view === 'lesson' && (
               <LessonView
-                key={`${selectedCourseId || 'no-course'}-${activeLessonId || 'no-lesson'}-${resumeStepIndex}`}
+                key={`${selectedCourseId || 'no-course'}-${activeLessonId || 'no-lesson'}-${resumeStepIndex}-${progressRevision}`}
                 courses={courses}
                 course={selectedCourse}
                 lesson={selectedLesson}
@@ -678,13 +709,13 @@ export default function App() {
             )}
 
             {view === 'progress' && (
-                <StudentBoard courses={courses} users={users} currentUser={activeUser} />
+                <StudentBoard courses={courses} users={users} currentUser={activeUser} refreshKey={progressRevision} />
             )}
 
             {view === 'reports' && isStaff && (
               <div>
                 <h2 className='section-subheading'>Staff Reports & Overview</h2>
-                <StudentBoard courses={courses} users={users} currentUser={activeUser} />
+                <StudentBoard courses={courses} users={users} currentUser={activeUser} refreshKey={progressRevision} />
               </div>
             )}
 

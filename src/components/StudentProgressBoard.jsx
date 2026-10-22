@@ -2,6 +2,8 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase, fetchAllSubmissions } from '../utils/storage';
 import { isReadingModule } from '../utils/moduleTypes';
 import { applyRemoteModuleProgress, calculateCourseProgressDetailed, findSubmission, getCourseOutline, getEarnedCertificates, stampEarnedCertificates, writeLocalProgressFlag } from '../utils/progress';
+import RestartCourseButton from './RestartCourseButton';
+import RestartRequests from './RestartRequests';
 import { claimOrphanSubmissions, reassignOrphanSubmissions } from '../utils/storage';
 import { getAcademySettings, getDisplayName } from '../utils/academySettings';
 import CertificateCard from './CertificateCard';
@@ -13,7 +15,7 @@ const isSubmissionPassed = (status) => {
   return ['pass', 'passed', 'approved', 'completed', 'read'].includes(normalized);
 };
 
-export default function StudentProgressBoard({ courses = [], users = [], currentUser = null }) {
+export default function StudentProgressBoard({ courses = [], users = [], currentUser = null, refreshKey = 0 }) {
   const [openMap, setOpenMap] = useState({});
   const [submissions, setSubmissions] = useState([]);
   const [loadingSubmissions, setLoadingSubmissions] = useState(true);
@@ -39,6 +41,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
   // Role helpers
   const userRole = String(currentUser?.role || '').trim().toLowerCase();
   const isStudentView = userRole === 'student';
+  const isAdmin = userRole === 'admin';
   const isAdminOrMentor = userRole === 'admin' || userRole === 'mentor';
 
   const loadSubmissions = useCallback(async () => {
@@ -63,7 +66,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
       .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result')
       .then(({ data, error }) => {
         if (cancelled || error || !Array.isArray(data)) return;
-        applyRemoteModuleProgress(claimOrphanSubmissions(data, users));
+        applyRemoteModuleProgress(data);
         setProgressStamp(Date.now());
       });
     return () => {
@@ -203,6 +206,18 @@ export default function StudentProgressBoard({ courses = [], users = [], current
         )}
       </div>
 
+      {isAdmin && (
+        <RestartRequests
+          courses={courses}
+          users={users}
+          currentUser={currentUser}
+          onResolved={() => {
+            loadSubmissions();
+            setProgressStamp(Date.now());
+          }}
+        />
+      )}
+
       {loadingSubmissions && <p>Loading student submission data...</p>}
 
       {courses.map((course) => (
@@ -337,7 +352,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                     );
                   })()}
 
-                  <div style={{ marginTop: 10, display: 'flex', gap: 10 }}>
+                  <div style={{ marginTop: 10, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                     <button
                       className='btn-secondary btn-inline'
                       type='button'
@@ -345,6 +360,14 @@ export default function StudentProgressBoard({ courses = [], users = [], current
                     >
                       {showDetails ? 'Hide Details' : 'Show Details'}
                     </button>
+                    {isStudentView && (
+                      <RestartCourseButton
+                        course={course}
+                        currentUser={student}
+                        users={users}
+                        refreshKey={refreshKey}
+                      />
+                    )}
                   </div>
 
                   {showDetails && (

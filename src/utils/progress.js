@@ -48,6 +48,39 @@ export function writeLocalProgressFlag(prefix, student, modId, value) {
   });
 }
 
+export function removeLocalProgressFlag(prefix, student, modId) {
+  const key = String(modId);
+  getStudentStorageIds(student).forEach((id) => {
+    try {
+      const storageKey = `${prefix}_${id}`;
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      delete saved[key];
+      localStorage.setItem(storageKey, JSON.stringify(saved));
+    } catch {
+      // ignore quota / private mode
+    }
+  });
+}
+
+const LOCAL_PROGRESS_PREFIXES = [
+  'read_modules',
+  'watched_videos',
+  'quiz_results',
+  'submitted_modules'
+];
+
+export function clearLocalCourseProgress(student, course) {
+  if (!student || !course) return;
+  getCourseModules(course).forEach((mod) => {
+    LOCAL_PROGRESS_PREFIXES.forEach((prefix) => {
+      removeLocalProgressFlag(prefix, student, mod.id);
+    });
+  });
+  const certificateIds = (course.lessons || []).map((lesson) => lessonCertificateId(course, lesson));
+  certificateIds.push(courseCertificateId(course));
+  certificateIds.forEach((id) => removeLocalProgressFlag('certificate_dates', student, id));
+}
+
 export function applyRemoteModuleProgress(rows) {
   if (!Array.isArray(rows)) return;
   rows.forEach((row) => {
@@ -179,7 +212,9 @@ export const isModuleCompletedByStudent = (mod, student) => {
     });
   }
 
-  return !!(mod.completed || mod.isCompleted);
+  // completed / isCompleted live on the shared course module. Grading used to
+  // stamp them when anyone passed, which made every student start above 0%.
+  return false;
 };
 
 /**
