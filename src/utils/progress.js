@@ -76,9 +76,24 @@ export function clearLocalCourseProgress(student, course) {
       removeLocalProgressFlag(prefix, student, mod.id);
     });
   });
-  const certificateIds = (course.lessons || []).map((lesson) => lessonCertificateId(course, lesson));
-  certificateIds.push(courseCertificateId(course));
-  certificateIds.forEach((id) => removeLocalProgressFlag('certificate_dates', student, id));
+  const courseId = String(course.id || '');
+  getStudentStorageIds(student).forEach((storageId) => {
+    try {
+      const storageKey = `certificate_dates_${storageId}`;
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      Object.keys(saved).forEach((key) => {
+        if (
+          key === courseCertificateId(course) ||
+          (courseId && (key === `course:${courseId}` || key.startsWith(`lesson:${courseId}:`)))
+        ) {
+          delete saved[key];
+        }
+      });
+      localStorage.setItem(storageKey, JSON.stringify(saved));
+    } catch {
+      // ignore quota / private mode
+    }
+  });
 }
 
 export function applyRemoteModuleProgress(rows) {
@@ -145,11 +160,11 @@ export const isStatusFailing = (status) => {
  */
 export const getCourseModules = (course) => {
   if (!course) return [];
-  if (Array.isArray(course.modules)) return course.modules;
-  if (Array.isArray(course.lessons)) {
-    return course.lessons.flatMap((lesson) => lesson.modules || []);
-  }
-  return [];
+  const fromLessons = Array.isArray(course.lessons)
+    ? course.lessons.flatMap((lesson) => lesson.modules || [])
+    : [];
+  if (fromLessons.length > 0) return fromLessons;
+  return Array.isArray(course.modules) ? course.modules : [];
 };
 
 /**

@@ -5,8 +5,19 @@ import {
   clearLocalCourseProgress,
   courseCertificateId,
   getCourseModules,
+  getStudentStorageIds,
   lessonCertificateId
 } from './progress';
+
+let progressEpoch = 0;
+
+export function currentProgressEpoch() {
+  return progressEpoch;
+}
+
+function bumpProgressEpoch() {
+  progressEpoch += 1;
+}
 
 function explainRestartError(error) {
   const message = error?.message || 'Request failed';
@@ -25,7 +36,38 @@ function explainRestartError(error) {
 }
 
 function appliedKey(student) {
-  return `applied_course_restarts_${student?.id || student?.email || 'student'}`;
+  return `applied_course_restarts_v2_${student?.id || student?.email || 'student'}`;
+}
+
+function personIds(student) {
+  return [...new Set(
+    getStudentStorageIds(student)
+      .concat(student?.id, student?.email, student?.studentId)
+      .filter(Boolean)
+      .map((value) => String(value))
+  )];
+}
+
+export async function wipeStoredCourseProgress(student, course) {
+  bumpProgressEpoch();
+  const moduleIds = getCourseModules(course).map((mod) => String(mod.id)).filter(Boolean);
+  const courseId = String(course?.id || '');
+  await Promise.all(
+    personIds(student).flatMap((sid) => {
+      const jobs = [];
+      if (courseId) {
+        jobs.push(supabase.from('submissions').delete().eq('student_id', sid).eq('course_id', courseId));
+      }
+      if (moduleIds.length) {
+        jobs.push(
+          supabase.from('module_progress').delete().eq('student_id', sid).in('module_id', moduleIds)
+        );
+      }
+      return jobs;
+    })
+  );
+  clearLocalCourseProgress(student, course);
+  bumpProgressEpoch();
 }
 
 export async function listRestartRequests({ studentId, courseId, status } = {}) {
@@ -83,8 +125,8 @@ export async function approveCourseRestart(request, course, student) {
     module_ids: moduleIds,
     certificate_keys: certificateKeysForCourse(course)
   });
-  if (error) throw explainRestartError(error);
-  clearLocalCourseProgress(
+  if (error && !/already/i.test(error.message || '')) throw explainRestartError(error);
+  await wipeStoredCourseProgress(
     student || { id: request.student_id, email: request.student_email },
     course
   );
@@ -130,13 +172,13 @@ export async function applyApprovedRestarts(student, courses) {
   const seen = new Set(applied);
   let changed = false;
 
-  rows.forEach((row) => {
-    if (seen.has(row.id)) return;
+  for (const row of rows) {
+    if (seen.has(row.id)) continue;
     const course = courses.find((item) => String(item.id) === String(row.course_id));
-    if (course) clearLocalCourseProgress(student, course);
+    if (course) await wipeStoredCourseProgress(student, course);
     seen.add(row.id);
     changed = true;
-  });
+  }
 
   if (changed) localStorage.setItem(appliedKey(student), JSON.stringify([...seen]));
   return changed;

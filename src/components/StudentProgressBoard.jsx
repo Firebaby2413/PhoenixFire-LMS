@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase, fetchAllSubmissions } from '../utils/storage';
 import { isReadingModule } from '../utils/moduleTypes';
 import { applyRemoteModuleProgress, calculateCourseProgressDetailed, findSubmission, getCourseOutline, getEarnedCertificates, stampEarnedCertificates, writeLocalProgressFlag } from '../utils/progress';
+import { currentProgressEpoch, wipeStoredCourseProgress, listRestartRequests } from '../utils/courseRestart';
 import RestartCourseButton from './RestartCourseButton';
 import RestartRequests from './RestartRequests';
 import { claimOrphanSubmissions, reassignOrphanSubmissions } from '../utils/storage';
@@ -61,11 +62,13 @@ export default function StudentProgressBoard({ courses = [], users = [], current
 
   useEffect(() => {
     let cancelled = false;
+    const epochAtStart = currentProgressEpoch();
     supabase
       .from('module_progress')
       .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result')
       .then(({ data, error }) => {
         if (cancelled || error || !Array.isArray(data)) return;
+        if (epochAtStart !== currentProgressEpoch()) return;
         applyRemoteModuleProgress(data);
         setProgressStamp(Date.now());
       });
@@ -73,6 +76,64 @@ export default function StudentProgressBoard({ courses = [], users = [], current
       cancelled = true;
     };
   }, [users]);
+
+  useEffect(() => {
+    if (userRole !== 'admin' || !courses.length) return undefined;
+    let cancelled = false;
+    const storageKey = 'repaired_course_restarts_v2';
+    (async () => {
+      let rows = [];
+      try {
+        rows = await listRestartRequests({ status: 'approved' });
+      } catch (err) {
+        console.error(err);
+        return;
+      }
+      if (cancelled) return;
+      let done = [];
+      try {
+        done = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      } catch {
+        done = [];
+      }
+      const seen = new Set(done);
+      let changed = false;
+      for (const row of rows) {
+        if (seen.has(row.id)) continue;
+        const course = courses.find((item) => String(item.id) === String(row.course_id));
+        if (!course) continue;
+        const student = (users || []).find((user) => String(user.id) === String(row.student_id)) || {
+          id: row.student_id,
+          email: row.student_email
+        };
+        const moduleIds = (course.lessons || [])
+          .flatMap((lesson) => lesson.modules || [])
+          .map((mod) => String(mod.id))
+          .filter(Boolean);
+        await supabase.rpc('approve_course_restart', {
+          request_id: row.id,
+          module_ids: moduleIds,
+          certificate_keys: [
+            ...(course.lessons || []).map((lesson) => `lesson:${course.id}:${lesson.id}`),
+            `course:${course.id}`
+          ]
+        });
+        await wipeStoredCourseProgress(student, course);
+        seen.add(row.id);
+        changed = true;
+      }
+      if (changed) {
+        localStorage.setItem(storageKey, JSON.stringify([...seen]));
+        if (!cancelled) {
+          setProgressStamp(Date.now());
+          loadSubmissions();
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userRole, courses, users, loadSubmissions]);
 
   const studentUsers = useMemo(() => {
     if (!Array.isArray(users)) return [];

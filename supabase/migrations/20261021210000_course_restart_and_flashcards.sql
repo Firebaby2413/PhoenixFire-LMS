@@ -94,8 +94,8 @@ begin
     raise exception 'Restart request not found';
   end if;
 
-  if req.status <> 'pending' then
-    raise exception 'This request is already %', req.status;
+  if req.status = 'denied' then
+    raise exception 'This request was denied';
   end if;
 
   delete from public.module_progress
