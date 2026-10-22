@@ -1942,5 +1942,23 @@ a.btn-secondary {
   margin-top: 8px;
 }
 
+.lounge-stage-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.lounge-stage-error .live-class-error {
+  margin: 0;
+}
+
+.lounge-stage-error .btn-secondary {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+
 
 

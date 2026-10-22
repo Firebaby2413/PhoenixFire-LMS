@@ -98,6 +98,7 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   const sharingRef = useRef(false);
   const screenTrackRef = useRef(null);
   const stageRef = useRef(null);
+  const fullscreenAfterDock = useRef(false);
 
   nameRef.current = getDisplayName(currentUser);
   mutedRef.current = muted;
@@ -486,11 +487,11 @@ export default function LoungeVoice({ loungeId, currentUser }) {
       setSharing(true);
       await publishVideoTrack(track);
     } catch (error) {
-      if (error?.name === 'NotAllowedError') {
-        setVoiceError('Choose a window or screen to share it.');
-      } else {
-        setVoiceError(error?.message || 'Could not share the screen.');
+      if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
+        setVoiceError('');
+        return;
       }
+      setVoiceError(error?.message || 'Could not share the screen.');
     }
   };
 
@@ -593,16 +594,30 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   }, [members]);
 
   useEffect(() => {
-    const onChange = () => setFullscreen(document.fullscreenElement === stageRef.current);
-    document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
-  }, []);
+    const doc = pipWindow?.document || document;
+    const onChange = () => setFullscreen(doc.fullscreenElement === stageRef.current);
+    doc.addEventListener('fullscreenchange', onChange);
+    return () => doc.removeEventListener('fullscreenchange', onChange);
+  }, [pipWindow]);
+
+  useEffect(() => {
+    if (pipWindow || !fullscreenAfterDock.current) return;
+    fullscreenAfterDock.current = false;
+    stageRef.current?.requestFullscreen();
+  }, [pipWindow]);
 
   const toggleFullscreen = async () => {
     const stage = stageRef.current;
     if (!stage) return;
-    if (document.fullscreenElement === stage) {
-      await document.exitFullscreen();
+    const doc = stage.ownerDocument || document;
+    if (doc.fullscreenElement) {
+      await doc.exitFullscreen();
+      return;
+    }
+    if (pipWindow) {
+      fullscreenAfterDock.current = true;
+      pipWindow.close();
+      setPipWindow(null);
       return;
     }
     await stage.requestFullscreen();
@@ -655,8 +670,15 @@ export default function LoungeVoice({ loungeId, currentUser }) {
 
   const stage = (
     <div className={`lounge-stage ${pipWindow ? 'is-popped' : ''}`} ref={stageRef}>
+      {voiceError && (
+        <div className='lounge-stage-error'>
+          <p className='live-class-error'>{voiceError}</p>
+          <button className='btn-secondary' type='button' onClick={() => setVoiceError('')}>
+            Dismiss
+          </button>
+        </div>
+      )}
       <div className='lounge-stage-videos'>
-        {voiceError && <p className='live-class-error'>{voiceError}</p>}
         {tiles.length === 0 && (
           <div className='lounge-stage-card'>
             <p>Nobody is in voice yet.</p>
