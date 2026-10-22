@@ -1,89 +1,22 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { getDisplayName, pushUserNotification, readUserNotifications } from '../utils/academySettings';
-import { supabase } from '../utils/supabaseClient';
-const STORAGE_KEY = "phoenix_lms_messages";
-const SEEN_KEY_PREFIX = 'lms_message_seen_';
+import { getDisplayName } from '../utils/academySettings';
+import { latestThreadPreview, sortContactsByThread } from '../utils/messageInbox';
 
-function readSeenMap(userId) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(`${SEEN_KEY_PREFIX}${userId}`) || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeSeenMap(userId, seenMap) {
-  localStorage.setItem(`${SEEN_KEY_PREFIX}${userId}`, JSON.stringify(seenMap));
-}
-
-function seedSeenMap(rows, user, people) {
-  const seen = {};
-  rows.forEach((row) => {
-    if (row.receiver_id !== user.id || !row.sender_id || !row.created_at) return;
-    if (!seen[row.sender_id] || row.created_at > seen[row.sender_id]) {
-      seen[row.sender_id] = row.created_at;
-    }
-  });
-
-  readUserNotifications(user)
-    .filter((note) => note.type === 'message' && !note.read)
-    .forEach((note) => {
-      const sender = people.find((person) => note.message === `New message from ${getDisplayName(person)}`);
-      if (!sender?.id || !seen[sender.id]) return;
-      seen[sender.id] = new Date(new Date(seen[sender.id]).getTime() - 1).toISOString();
-    });
-
-    return seen;
-}
-
-function incomingNotices(rows, user, people, seenMap) {
-  const bySender = new Map();
-  rows.forEach((row) => {
-    if (row.receiver_id !== user.id || row.sender_id === user.id || !row.id) return;
-    const list = bySender.get(row.sender_id) || [];
-    list.push(row);
-    bySender.set(row.sender_id, list);
-  });
-
-  const notes = [];
-  bySender.forEach((list, senderId) => {
-    const seenAt = seenMap[senderId] ? new Date(seenMap[senderId]).getTime() : 0;
-    const unread = list.filter((row) => new Date(row.created_at).getTime() > seenAt);
-    if (!unread.length) return;
-    const newest = unread.slice().sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-    const sender = people.find((person) => person.id === senderId);
-    notes.push({
-      id: newest.id,
-      senderId,
-      senderName: sender ? getDisplayName(sender) : 'Someone',
-      preview: (newest.body || '').slice(0, 80),
-      count: unread.length
-    });
-  });
-
-  return notes;
-}
-
-export default function Messages({ currentUser = {}, users = [] }) {
+export default function Messages({
+  currentUser = {},
+  users = [],
+  messages = [],
+  notices = [],
+  onOpenThread,
+  onSendMessage
+}) {
   const [selectedContact, setSelectedContact] = useState(null);
   const [msgText, setMsgText] = useState("");
   const [isContactsOpen, setIsContactsOpen] = useState(true);
-  const [localMessages, setLocalMessages] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.error("Failed to load messages from localStorage", e);
-      return [];
-    }
-  });
   const [searchQuery, setSearchQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
 
   const threadRef = useRef(null);
-  const usersRef = useRef(users);
-  const [seenMap, setSeenMap] = useState(() => (currentUser?.id ? readSeenMap(currentUser.id) : {}));
 
   const isStaff =
     currentUser?.role?.toLowerCase() === "admin" ||
@@ -91,56 +24,15 @@ export default function Messages({ currentUser = {}, users = [] }) {
     currentUser?.role?.toLowerCase() === "ta";
 
   useEffect(() => {
-    usersRef.current = users;
-  }, [users]);
-
-  useEffect(() => {
-    if (!currentUser?.id) return undefined;
-    let cancelled = false;
-
-    const loadMessages = () => {
-      supabase
-        .from('messages')
-        .select('*')
-        .or(`sender_id.eq.${currentUser.id},receiver_id.eq.${currentUser.id}`)
-        .order('created_at')
-        .then(({ data, error }) => {
-          if (cancelled) return;
-          if (error) {
-            console.error('Could not load messages:', error.message);
-            return;
-          }
-          setLocalMessages(data || []);
-          const rows = data || [];
-          const key = `${SEEN_KEY_PREFIX}${currentUser.id}`;
-          if (!localStorage.getItem(key)) {
-            if (!rows.length) return;
-            const seeded = seedSeenMap(rows, currentUser, usersRef.current);
-            writeSeenMap(currentUser.id, seeded);
-            setSeenMap(seeded);
-            return;
-          }
-          setSeenMap(readSeenMap(currentUser.id));
-        });
-    };
-
-    loadMessages();
-    const channel = supabase
-      .channel(`messages-${currentUser.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, loadMessages)
-      .subscribe();
-
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-    };
-  }, [currentUser]);
+    if (!selectedContact?.id) return;
+    onOpenThread?.(selectedContact);
+  }, [selectedContact, messages, onOpenThread]);
 
   useEffect(() => {
     const thread = threadRef.current;
     if (!thread) return;
     thread.scrollTo({ top: 0, behavior: 'smooth' });
-  }, [localMessages, selectedContact]);
+  }, [messages, selectedContact]);
 
   const baseContacts = useMemo(() => {
     const list = Array.isArray(users) ? users : [];
@@ -148,18 +40,22 @@ export default function Messages({ currentUser = {}, users = [] }) {
   }, [users, currentUser.email]);
 
   const filteredContacts = useMemo(() => {
-    return baseContacts.filter((c) => {
+    const matched = baseContacts.filter((c) => {
       const fullName = `${c.firstName || ""} ${c.lastName || ""}`.toLowerCase();
+      const displayName = getDisplayName(c).toLowerCase();
+      const query = searchQuery.toLowerCase();
       const matchesSearch =
-        fullName.includes(searchQuery.toLowerCase()) ||
-        c.email?.toLowerCase().includes(searchQuery.toLowerCase());
+        fullName.includes(query) ||
+        displayName.includes(query) ||
+        c.email?.toLowerCase().includes(query);
 
       const matchesRole =
         roleFilter === "all" ? true : c.role?.toLowerCase() === roleFilter.toLowerCase();
 
       return matchesSearch && matchesRole;
     });
-  }, [baseContacts, searchQuery, roleFilter]);
+    return sortContactsByThread(matched, messages, currentUser);
+  }, [baseContacts, searchQuery, roleFilter, messages, currentUser]);
 
   const messageBody = (message) => message.body || message.text || '';
   const messageTime = (message) => message.created_at || message.timestamp;
@@ -167,42 +63,25 @@ export default function Messages({ currentUser = {}, users = [] }) {
     messageValue === person?.id || messageValue === person?.email;
 
   const sendMessage = async () => {
-    if (!msgText.trim() || !selectedContact?.id) return;
-    const { data, error } = await supabase
-      .from('messages')
-      .insert({
-        sender_id: currentUser.id,
-        receiver_id: selectedContact.id,
-        body: msgText.trim()
-      })
-      .select()
-      .single();
-    if (error) {
-      alert(error.message);
-      return;
+    if (!msgText.trim() || !selectedContact?.id || !onSendMessage) return;
+    try {
+      await onSendMessage(selectedContact, msgText);
+      setMsgText("");
+    } catch (err) {
+      alert(err.message || 'Could not send this message.');
     }
-    setLocalMessages((prev) => [...prev, data]);
-    setMsgText("");
-    pushUserNotification(
-      selectedContact,
-      'message',
-      `New message from ${getDisplayName(currentUser)}`
-    );
   };
 
   const incoming = useMemo(() => {
-    return incomingNotices(localMessages, currentUser, users, seenMap)
-      .filter((note) => note.senderId !== selectedContact?.id);
-  }, [localMessages, currentUser, users, seenMap, selectedContact?.id]);
+    return notices.filter((note) => note.senderId !== selectedContact?.id);
+  }, [notices, selectedContact?.id]);
 
   const openContact = (person) => {
     setSelectedContact(person);
-    setSeenMap((prev) => {
-      const next = { ...prev, [person.id]: new Date().toISOString() };
-      if (currentUser?.id) writeSeenMap(currentUser.id, next);
-      return next;
-    });
+    onOpenThread?.(person);
   };
+
+  const unreadFor = (person) => notices.find((note) => note.senderId === person.id);
 
   return (
     <div className="section-container" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -292,7 +171,10 @@ export default function Messages({ currentUser = {}, users = [] }) {
                   </p>
                 )}
 
-                {filteredContacts.map((c) => (
+                {filteredContacts.map((c) => {
+                  const unread = unreadFor(c);
+                  const preview = latestThreadPreview(messages, currentUser, c);
+                  return (
                   <button
                     key={c.id || c.email}
                     className={`course-box ${selectedContact?.email === c.email ? "active-msg" : ""}`}
@@ -309,11 +191,12 @@ export default function Messages({ currentUser = {}, users = [] }) {
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-                      <div style={{ fontWeight: "bold", fontSize: "0.9rem", color: "inherit" }}>
+                      <div style={{ fontWeight: unread ? 700 : 600, fontSize: "0.9rem", color: "inherit", minWidth: 0 }}>
                         {getDisplayName(c)}
                       </div>
-                      {incoming.some((note) => note.senderId === c.id) && (
+                      {unread && (
                         <span
+                          aria-label={`${unread.count} unread`}
                           style={{
                             minWidth: "22px",
                             height: "22px",
@@ -325,18 +208,35 @@ export default function Messages({ currentUser = {}, users = [] }) {
                             fontWeight: "bold",
                             display: "inline-flex",
                             alignItems: "center",
-                            justifyContent: "center"
+                            justifyContent: "center",
+                            flexShrink: 0
                           }}
                         >
-                          {incoming.find((note) => note.senderId === c.id).count}
+                          {unread.count}
                         </span>
                       )}
                     </div>
+                    {preview && (
+                      <div
+                        style={{
+                          fontSize: "12px",
+                          marginTop: "4px",
+                          opacity: unread ? 0.95 : 0.65,
+                          fontWeight: unread ? 600 : 400,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis"
+                        }}
+                      >
+                        {preview}
+                      </div>
+                    )}
                     <div style={{ fontSize: "11px", opacity: 0.7, textTransform: "uppercase", marginTop: "2px", color: "inherit" }}>
                       {c.role}
                     </div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </>
           )}
@@ -407,7 +307,7 @@ export default function Messages({ currentUser = {}, users = [] }) {
                   marginBottom: "15px"
                 }}
               >
-                {localMessages
+                {messages
                   .filter((m) => {
                     const mine = samePerson(m.sender_id, currentUser) || samePerson(m.sender, currentUser);
                     const fromThem = samePerson(m.sender_id, selectedContact) || samePerson(m.sender, selectedContact);

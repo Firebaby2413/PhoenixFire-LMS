@@ -10,7 +10,8 @@ const Sidebar = ({
   courses = [],
   currentUser,
   onLogout,
-  academyName = 'Phoenix Fire Technical Academy'
+  academyName = 'Phoenix Fire Technical Academy',
+  messageUnread = 0
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -118,10 +119,16 @@ const Sidebar = ({
           type="button"
           className={`sidebar-btn ${currentView === 'messages' ? 'active' : ''}`}
           onClick={() => setView('messages')}
-          title="Messages"
+          title={messageUnread > 0 ? `Messages, ${messageUnread} unread` : 'Messages'}
+          aria-label={messageUnread > 0 ? `Messages, ${messageUnread} unread` : 'Messages'}
         >
-          <span className="nav-icon">💬</span>
-          {!isCollapsed && <span className="nav-label">Messages</span>}
+          <span className="sidebar-btn-main">
+            <span className="nav-icon">💬</span>
+            {!isCollapsed && <span className="nav-label">Messages</span>}
+          </span>
+          {messageUnread > 0 && (
+            <span className="sidebar-badge">{messageUnread > 99 ? '99+' : messageUnread}</span>
+          )}
         </button>
 
         <button

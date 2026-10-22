@@ -21,6 +21,7 @@ import { useAuth } from './context/AuthContext';
 import { exportData, importData, deleteCourse } from './utils/storage';
 import { withModuleClassification } from './utils/moduleTypes';
 import { getAcademySettings, validateAccountKeyRemote } from './utils/academySettings';
+import { useMessageInbox } from './hooks/useMessageInbox';
 import { profileFromRow } from './utils/profileShape';
 import { loadCourses, saveCourse, uploadCourses } from './utils/courseService';
 import phoenixLogo from './assets/Images/phoenix.jpg';
@@ -236,6 +237,7 @@ export default function App() {
   }, [theme]);
 
   const activeUser = authUser || localUser;
+  const messageInbox = useMessageInbox(activeUser, users);
 
   /* --- Auth Handlers --- */
   const handleSignIn = async (email, password) => {
@@ -414,6 +416,7 @@ export default function App() {
           courses={courses}
           currentUser={activeUser}
           onLogout={handleLogout}
+          messageUnread={messageInbox.unreadCount}
         />
 
         <main id='content' className={fillsWindow ? 'content-messages' : undefined}>
@@ -582,7 +585,14 @@ export default function App() {
             )}
 
             {view === 'messages' && (
-              <Messages currentUser={activeUser} users={users} />
+              <Messages
+                currentUser={activeUser}
+                users={users}
+                messages={messageInbox.rows}
+                notices={messageInbox.notices}
+                onOpenThread={messageInbox.markThreadRead}
+                onSendMessage={messageInbox.sendMessage}
+              />
             )}
 
             {view === 'live-classes' && (

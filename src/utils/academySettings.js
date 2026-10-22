@@ -161,16 +161,33 @@ export function readUserNotifications(user) {
   }
 }
 
-export function pushUserNotification(user, type, message) {
+export function messageNoteMatchesPerson(note, person) {
+  if (!note || note.type !== 'message' || !person) return false;
+  if (note.senderId && person.id && String(note.senderId) === String(person.id)) return true;
+  const text = String(note.message || '').trim();
+  if (!text.startsWith('New message from ')) return false;
+  const from = text.slice('New message from '.length).trim().toLowerCase();
+  if (!from) return false;
+  const name = getDisplayName(person).trim().toLowerCase();
+  const email = String(person.email || '').trim().toLowerCase();
+  return from === name || Boolean(email && from === email);
+}
+
+export function pushUserNotification(user, type, message, extra = {}) {
   if (!user || !message) return;
   const prefs = getUserPrefs(user);
   if (type === 'passed' && prefs.notifyPassed === false) return;
   if (type === 'revision' && prefs.notifyRevision === false) return;
   if (type === 'message' && prefs.notifyMessage === false) return;
-  const next = [
-    { id: Date.now(), type, message, read: false, at: new Date().toISOString() },
-    ...readUserNotifications(user)
-  ].slice(0, 40);
+  const note = {
+    id: Date.now(),
+    type,
+    message,
+    read: false,
+    at: new Date().toISOString()
+  };
+  if (extra.senderId) note.senderId = extra.senderId;
+  const next = [note, ...readUserNotifications(user)].slice(0, 40);
   localStorage.setItem(notificationKey(user), JSON.stringify(next));
   if (isUuid(user?.id)) {
     supabase
@@ -187,6 +204,15 @@ export function pushUserNotification(user, type, message) {
 
 export function markNotificationsRead(user) {
   const next = readUserNotifications(user).map((n) => ({ ...n, read: true }));
+  localStorage.setItem(notificationKey(user), JSON.stringify(next));
+  return next;
+}
+
+export function markMessageNotificationsRead(user, person) {
+  if (!user || !person) return readUserNotifications(user);
+  const next = readUserNotifications(user).map((note) => (
+    messageNoteMatchesPerson(note, person) ? { ...note, read: true } : note
+  ));
   localStorage.setItem(notificationKey(user), JSON.stringify(next));
   return next;
 }

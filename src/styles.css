@@ -657,17 +657,49 @@ body.light-theme .module-card,
   background: rgba(255, 106, 0, 0.2);
 }
 
+.sidebar-btn-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
 .sidebar-badge {
   background: var(--phoenix-orange);
   color: #020617;
   font-size: 11px;
   min-width: 20px;
   height: 20px;
-  border-radius: 50%;
-  display: flex;
+  padding: 0 6px;
+  border-radius: 999px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-weight: bold;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-left: auto;
+  box-sizing: border-box;
+}
+
+.sidebar-btn.active .sidebar-badge {
+  background: #020617;
+  color: #fff;
+}
+
+#sidebar.collapsed .sidebar-btn {
+  position: relative;
+}
+
+#sidebar.collapsed .sidebar-badge {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  margin-left: 0;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
 }
 
 .sidebar-logout {
@@ -1887,6 +1919,27 @@ a.btn-secondary {
   .lounge-side {
     min-height: 420px;
   }
+}
+
+.lounge-stage:fullscreen,
+.lounge-stage.is-popped {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  background: #070b16;
+}
+
+.lounge-stage-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lounge-stage-tools .btn-secondary {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 8px;
 }
 
 

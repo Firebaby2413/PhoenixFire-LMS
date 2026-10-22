@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { getDisplayName } from '../utils/academySettings';
 import { supabase } from '../utils/supabaseClient';
 
@@ -76,6 +77,9 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   const [voiceError, setVoiceError] = useState('');
   const [voiceListOpen, setVoiceListOpen] = useState(true);
   const [unseenJoins, setUnseenJoins] = useState(0);
+  const [sharing, setSharing] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [pipWindow, setPipWindow] = useState(null);
 
   const channelRef = useRef(null);
   const peersRef = useRef(new Map());
@@ -91,6 +95,9 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   const voiceListOpenRef = useRef(true);
   const seenVoiceIds = useRef(new Set());
   const voiceListPrimed = useRef(false);
+  const sharingRef = useRef(false);
+  const screenTrackRef = useRef(null);
+  const stageRef = useRef(null);
 
   nameRef.current = getDisplayName(currentUser);
   mutedRef.current = muted;
@@ -297,7 +304,7 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     onSync: () => {
       const channel = channelRef.current;
       if (!channel) return;
-      const people = readMembers(channel, selfId);
+      const people = readMembers(channel, selfId).filter((person) => joinedRef.current || !person.self);
       setMembers(people);
       connectTo(people);
     },
@@ -391,19 +398,100 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   };
 
   const leave = async () => {
+    const channel = channelRef.current;
+    const screenTrack = screenTrackRef.current;
+    screenTrackRef.current = null;
+    sharingRef.current = false;
     dropCall();
     setJoined(false);
     setMuted(false);
     setCameraOn(false);
+    setSharing(false);
     setLocalStream(null);
     setPeers([]);
+    setMembers((people) => people.filter((person) => person.id !== selfId));
     setVoiceError('');
+    if (screenTrack) screenTrack.stop();
     try {
-      await channelRef.current?.untrack();
+      await channel?.untrack();
     } catch (error) {
       console.error('Could not leave voice', error);
     }
-    handlersRef.current.onSync?.();
+  };
+
+  const renegotiate = async () => {
+    const session = sessionRef.current;
+    for (const [id, entry] of peersRef.current) {
+      if (!entry.pc || entry.pc.signalingState !== 'stable') continue;
+      const offer = await entry.pc.createOffer();
+      if (session !== sessionRef.current) return;
+      await entry.pc.setLocalDescription(offer);
+      sendSignal({ kind: 'offer', to: id, sdp: entry.pc.localDescription });
+    }
+  };
+
+  const publishVideoTrack = async (track) => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    let added = false;
+    for (const [, entry] of peersRef.current) {
+      const sender = entry.pc.getSenders().find((item) => item.track?.kind === 'video');
+      if (sender) await sender.replaceTrack(track);
+      else if (track) {
+        entry.pc.addTrack(track, stream);
+        added = true;
+      }
+    }
+    if (track && !stream.getTracks().includes(track)) stream.addTrack(track);
+    setLocalStream(stream);
+    if (added || !track) await renegotiate();
+  };
+
+  const stopScreen = async () => {
+    const track = screenTrackRef.current;
+    if (!track && !sharingRef.current) return;
+    screenTrackRef.current = null;
+    sharingRef.current = false;
+    setSharing(false);
+    if (track) {
+      const stream = localStreamRef.current;
+      if (stream?.getTracks().includes(track)) stream.removeTrack(track);
+      track.stop();
+    }
+    await publishVideoTrack(null);
+  };
+
+  const toggleShare = async () => {
+    const stream = localStreamRef.current;
+    if (!stream) return;
+    setVoiceError('');
+    if (sharingRef.current) {
+      await stopScreen();
+      return;
+    }
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = display.getVideoTracks()[0];
+      stream.getVideoTracks().forEach((existing) => {
+        stream.removeTrack(existing);
+        existing.stop();
+      });
+      track.addEventListener('ended', () => {
+        stopScreen();
+      });
+      screenTrackRef.current = track;
+      sharingRef.current = true;
+      cameraRef.current = false;
+      setCameraOn(false);
+      setSharing(true);
+      await publishVideoTrack(track);
+    } catch (error) {
+      if (error?.name === 'NotAllowedError') {
+        setVoiceError('Choose a window or screen to share it.');
+      } else {
+        setVoiceError(error?.message || 'Could not share the screen.');
+      }
+    }
   };
 
   const toggleMute = async () => {
@@ -424,6 +512,16 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     const stream = localStreamRef.current;
     if (!stream) return;
     setVoiceError('');
+    if (sharingRef.current) {
+      const screenTrack = screenTrackRef.current;
+      screenTrackRef.current = null;
+      sharingRef.current = false;
+      setSharing(false);
+      if (screenTrack) {
+        stream.removeTrack(screenTrack);
+        screenTrack.stop();
+      }
+    }
     const existing = stream.getVideoTracks()[0];
 
     try {
@@ -494,58 +592,129 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     if (joins) setUnseenJoins((count) => count + joins);
   }, [members]);
 
-  const tiles = members.map((member) => {
-    const peer = peers.find((item) => item.id === member.id);
-    const isMuted = member.self ? muted : member.muted;
-    const showVideo = member.self ? cameraOn : Boolean(peer?.cameraOn);
-    const stream = member.self ? localStream : peer?.stream;
-    return { member, peer, isMuted, showVideo, stream }
+  useEffect(() => {
+    const onChange = () => setFullscreen(document.fullscreenElement === stageRef.current);
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  const toggleFullscreen = async () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    if (document.fullscreenElement === stage) {
+      await document.exitFullscreen();
+      return;
+    }
+    await stage.requestFullscreen();
+  };
+
+  const copyPipStyles = (pip) => {
+    [...document.styleSheets].forEach((sheet) => {
+      try {
+        const style = pip.document.createElement('style');
+        style.textContent = [...sheet.cssRules].map((rule) => rule.cssText).join('\n');
+        pip.document.head.append(style);
+      } catch {
+        if (!sheet.href) return;
+        const link = pip.document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = sheet.href;
+        pip.document.head.append(link);
+      }
+    });
+    pip.document.body.style.margin = '0';
+    pip.document.body.style.height = '100%';
+    pip.document.body.style.background = '#070b16';
+  };
+
+  const togglePopout = async () => {
+    if (pipWindow) {
+      pipWindow.close();
+      setPipWindow(null);
+      return;
+    }
+    if (!window.documentPictureInPicture?.requestWindow) {
+      setVoiceError('Pop out works in Chrome and Edge. Full screen works in this browser.');
+      return;
+    }
+    const pip = await window.documentPictureInPicture.requestWindow({ width: 960, height: 540 });
+    copyPipStyles(pip);
+    pip.addEventListener('pagehide', () => setPipWindow(null));
+    setPipWindow(pip);
+  };
+
+  const tiles = members 
+      .filter((member) => joined || !member.self)
+      .map((member) => {
+        const peer = peers.find((item) => item.id === member.id);
+        const isMuted = member.self ? muted : member.muted;
+        const showVideo = member.self ? (cameraOn || sharing) : Boolean(peer?.cameraOn);
+        const stream = member.self ? localStream : peer?.stream;
+        return { member, peer, isMuted, showVideo, stream }
   });
+
+  const stage = (
+    <div className={`lounge-stage ${pipWindow ? 'is-popped' : ''}`} ref={stageRef}>
+      <div className='lounge-stage-videos'>
+        {voiceError && <p className='live-class-error'>{voiceError}</p>}
+        {tiles.length === 0 && (
+          <div className='lounge-stage-card'>
+            <p>Nobody is in voice yet.</p>
+          </div>
+        )}
+        {tiles.map(({ member, peer, isMuted, showVideo, stream }) => (
+          <article key={member.id} className='lounge-stage-card'>
+            <p className='lounge-voice-name'>
+              <span className={`lounge-voice-dot ${isMuted ? 'is-muted' : ''}`} />
+              <strong>{member.self ? 'You' : member.name}</strong>
+              <span className='lounge-role'>
+                {member.self && sharing ? 'Screen' : isMuted ? 'Muted' : 'Live'}
+              </span>
+            </p>
+            {joined && !member.self && peer && peer.connection !== 'connected' && (
+              <p className='lounge-voice-status'>Connecting...</p>
+            )}
+            {stream && <MediaTile stream={stream} video={showVideo} hear={!member.self} />}
+          </article>
+        ))}
+      </div>
+
+      <div className='lounge-stage-tools'>
+        <button className='btn-secondary' type='button' onClick={toggleFullscreen}>
+          {fullscreen ? 'Exit full screen' : 'Full screen'}
+        </button>
+        <button className='btn-secondary' type='button' onClick={togglePopout}>
+          {pipWindow ? 'Dock video' : 'Pop out'}
+        </button>
+      </div>
+
+      {!joined && (
+        <button className='btn' type='button' onClick={join} disabled={!ready || joining || !selfId}>
+          {joining ? 'Joining...' : 'Join voice'}
+        </button>
+      )}
+      {joined && (
+        <div className='lounge-voice-actions'>
+          <button className='btn-secondary' type='button' onClick={toggleMute}>
+            {muted ? 'Unmute' : 'Mute'}
+          </button>
+          <button className='btn-secondary' type='button' onClick={toggleCamera}>
+            {cameraOn ? 'Camera off' : 'Camera on'}
+          </button>
+          <button className='btn-secondary' type='button' onClick={toggleShare}>
+            {sharing ? 'Stop sharing' : 'Share screen'}
+          </button>
+          <button className='btn' type='button' onClick={leave}>
+            Leave voice
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <aside className="card lounge-panel lounge-voice">
-      <div className='lounge-stage'>
-        <div className='lounge-stage-videos'>
-          {voiceError && <p className='live-class-error'>{voiceError}</p>}
-          {tiles.length === 0 && (
-            <div className='lounge-stage-card'>
-              <p>Nobody is in voice yet.</p>
-            </div>
-          )}
-          {tiles.map(({ member, peer, isMuted, showVideo, stream }) => (
-            <article key={member.id} className='lounge-stage-card'>
-              <p className='lounge-voice-name'>
-                <span className={`lounge-voice-dot ${isMuted ? 'is-muted' : ''}`} />
-                <strong>{member.self ? 'You' : member.name}</strong>
-                <span className='lounge-role'>{isMuted ? 'Muted' : 'Live'}</span>
-              </p>
-              {joined && !member.self && peer && peer.connection !== 'connected' && (
-                <p className='lounge-voice-status'>Connecting...</p>
-              )}
-              {stream && <MediaTile stream={stream} video={showVideo} hear={!member.self} />}
-            </article>
-          ))}
-        </div>
-
-        {!joined && (
-          <button className='btn' type='button' onClick={join} disabled={!ready || joining || !selfId}>
-            {joining ? 'Joining...' : 'Join voice'}
-          </button>
-        )}
-        {joined && (
-          <div className='lounge-voice-actions'>
-            <button className='btn-secondary' type='button' onClick={toggleMute}>
-              {muted ? 'Unmute' : 'Mute'}
-            </button>
-            <button className='btn-secondary' type='button' onClick={toggleCamera}>
-              {cameraOn ? 'Camera off' : 'Camera on'}
-            </button>
-            <button className='btn' type='button' onClick={leave}>
-              Leave voice
-            </button>
-          </div>
-        )}
-      </div>
+      {pipWindow ? createPortal(stage, pipWindow.document.body) : stage}
 
       <section className={`lounge-voice-list ${voiceListOpen ? '' : 'is-collapsed'}`}>
         <button
