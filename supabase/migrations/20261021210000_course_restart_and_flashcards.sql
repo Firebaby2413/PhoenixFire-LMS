@@ -117,13 +117,16 @@ begin
     );
 
   delete from public.submissions
-  where course_id::text = req.course_id
-    and (
+  where (
       student_id::text = req.student_id
       or (
         req.student_email <> ''
         and lower(student_id::text) = lower(req.student_email)
       )
+    )
+    and (
+      course_id::text = req.course_id
+      or module_id::text = any(module_ids)
     );
 
   -- The live certificates table was created before certificate_key existed.

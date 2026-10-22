@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import { supabase, fetchAllSubmissions } from '../utils/storage';
 import { isReadingModule } from '../utils/moduleTypes';
 import { applyRemoteModuleProgress, calculateCourseProgressDetailed, clearLocalCourseProgress, findSubmission, getCourseModules, getCourseOutline, getEarnedCertificates, isFreshCertificate, removeLocalProgressFlag, writeLocalProgressFlag } from '../utils/progress';
-import { certificateKeysForCourse, currentProgressEpoch, listRestartRequests } from '../utils/courseRestart';
+import { certificateKeysForCourse, currentProgressEpoch, deleteCourseWorkBeforeRestart, listRestartRequests, restartClearsSubmission } from '../utils/courseRestart';
 import RestartCourseButton from './RestartCourseButton';
 import RestartRequests from './RestartRequests';
 import { claimOrphanSubmissions, reassignOrphanSubmissions } from '../utils/storage';
@@ -24,6 +24,7 @@ export default function StudentProgressBoard({ courses = [], users = [], current
   const [certificateStamp, setCertificateStamp] = useState(0);
   const [progressStamp, setProgressStamp] = useState(0);
   const [restartTimes, setRestartTimes] = useState({});
+  const [approvedRestarts, setApprovedRestarts] = useState([]);
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -125,51 +126,62 @@ export default function StudentProgressBoard({ courses = [], users = [], current
     const epochAtStart = currentProgressEpoch();
 
     async function loadProgress() {
-      const progressResult = await supabase
-        .from('module_progress')
-        .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result, updated_at');
-      if (cancelled || progressResult.error || !Array.isArray(progressResult.data)) return;
-      if (epochAtStart !== currentProgressEpoch()) return;
-
-      const resetResult = await listRestartRequests({ status: 'approved' });
+      const resetResult = await listRestartRequests({ status: 'approved' }).catch(() => []);
       const resets = Array.isArray(resetResult) ? resetResult : [];
       const times = {};
-      resets.forEach((reset) => {
+      const restartRecords = [];
+
+      for (const reset of resets) {
         const courseId = String(reset.course_id || '');
-        if (!courseId) return;
+        if (!courseId) continue;
+        const course = courses.find((item) => String(item.id) === courseId);
         const resetAt = new Date(reset.reviewed_at || reset.created_at || 0).getTime();
         times[courseId] = Math.max(times[courseId] || 0, resetAt);
-      });
-      if (!cancelled) setRestartTimes(times);
-      let rows = progressResult.data;
-
-      resets.forEach((reset) => {
-        const course = courses.find((item) => String(item.id) === String(reset.course_id));
-        if (!course) return;
+        if (!course) continue;
         const student = (users || []).find((user) => String(user.id) === String(reset.student_id)) || {
           id: reset.student_id,
           email: reset.student_email
         };
+        const moduleIds = getCourseModules(course).map((mod) => String(mod.id)).filter(Boolean);
+        const studentIds = [reset.student_id, reset.student_email, student.id, student.email, student.studentId]
+          .filter(Boolean)
+          .map((value) => String(value).toLowerCase());
+        restartRecords.push({ courseId, resetAt, studentIds, moduleIds });
         clearLocalCourseProgress(student, course);
+        await deleteCourseWorkBeforeRestart(student, course, resetAt);
+      }
 
-        const moduleIds = new Set(
-          (course.lessons || []).flatMap((lesson) => (lesson.modules || []).map((mod) => String(mod.id)))
-        );
-        const resetAt = new Date(reset.reviewed_at || reset.created_at || 0).getTime();
-        const studentIds = new Set(
-          [reset.student_id, reset.student_email, student.id, student.email, student.studentId]
-            .filter(Boolean)
-            .map((value) => String(value).toLowerCase())
-        );
+      if (!cancelled) {
+        setRestartTimes(times);
+        setApprovedRestarts(restartRecords);
+      }
 
+      let progressResult = await supabase
+        .from('module_progress')
+        .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result, updated_at');
+      if (progressResult.error) {
+        progressResult = await supabase
+          .from('module_progress')
+          .select('student_id, module_id, is_read, is_watched, is_submitted, quiz_result');
+      }
+      if (cancelled || progressResult.error || !Array.isArray(progressResult.data)) {
+        if (!cancelled) setProgressStamp(Date.now());
+        return;
+      }
+      if (epochAtStart !== currentProgressEpoch()) return;
+
+      let rows = progressResult.data;
+      restartRecords.forEach((reset) => {
+        const moduleIds = new Set(reset.moduleIds);
+        const studentIds = new Set(reset.studentIds);
         rows = rows.filter((row) => {
           const sameStudent = studentIds.has(String(row.student_id || '').toLowerCase());
           const sameModule = moduleIds.has(String(row.module_id));
           if (!sameStudent || !sameModule) return true;
           const savedAt = new Date(row.updated_at || 0).getTime();
-          return savedAt > resetAt;
+          return savedAt > reset.resetAt;
         });
-      }); 
+      });
 
       if (cancelled || epochAtStart !== currentProgressEpoch()) return;
       applyRemoteModuleProgress(rows);
@@ -201,10 +213,10 @@ export default function StudentProgressBoard({ courses = [], users = [], current
     return studentUsers.filter((user) => keysOf(user).includes(currentStudentKey));
   }, [currentUser, isStudentView, studentUsers]);
 
-  const ownedSubmissions = useMemo(
-    () => claimOrphanSubmissions(submissions, users),
-    [submissions, users]
-  );
+  const ownedSubmissions = useMemo(() => {
+    const claimed = claimOrphanSubmissions(submissions, users);
+    return claimed.filter((sub) => !approvedRestarts.some((reset) => restartClearsSubmission(sub, reset)));
+  }, [submissions, users, approvedRestarts]);
 
   useEffect(() => {
     if (!users.length || !submissions.length) return;

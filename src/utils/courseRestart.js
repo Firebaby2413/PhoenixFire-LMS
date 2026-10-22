@@ -48,6 +48,59 @@ function personIds(student) {
   )];
 }
 
+export function submissionSavedAt(sub) {
+  const raw = sub?.created_at || sub?.submittedAt || sub?.updated_at || 0;
+  const time = new Date(raw).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+export function restartClearsSubmission(sub, restart) {
+  if (!sub || !restart) return false;
+  const studentIds = new Set((restart.studentIds || []).map((value) => String(value).toLowerCase()));
+  const subStudent = String(sub.student_id || sub.studentId || sub.studentEmail || sub.email || sub.student || '').toLowerCase();
+  if (!studentIds.has(subStudent)) return false;
+  const moduleId = String(sub.module_id || sub.moduleId || '');
+  const courseId = String(sub.course_id || sub.courseId || '');
+  const sameCourse = (restart.courseId && courseId === restart.courseId)
+    || (restart.moduleIds || []).includes(moduleId);
+  if (!sameCourse) return false;
+  return submissionSavedAt(sub) <= restart.resetAt;
+}
+
+export async function deleteCourseWorkBeforeRestart(student, course, resetAt) {
+  const moduleIds = getCourseModules(course).map((mod) => String(mod.id)).filter(Boolean);
+  const courseId = String(course?.id || '');
+  const cutoff = new Date(resetAt || 0).toISOString();
+  await Promise.all(
+    personIds(student).flatMap((sid) => {
+      const jobs = [];
+      if (moduleIds.length) {
+        jobs.push(
+          supabase.from('module_progress').delete().eq('student_id', sid).in('module_id', moduleIds).lte('updated_at', cutoff)
+        );
+        jobs.push(
+          supabase.from('module_progress').delete().eq('student_id', sid).in('module_id', moduleIds).is('updated_at', null)
+        );
+        jobs.push(
+          supabase.from('submissions').delete().eq('student_id', sid).in('module_id', moduleIds).lte('created_at', cutoff)
+        );
+        jobs.push(
+          supabase.from('submissions').delete().eq('student_id', sid).in('module_id', moduleIds).is('created_at', null)
+        );
+      }
+      if (courseId) {
+        jobs.push(
+          supabase.from('submissions').delete().eq('student_id', sid).eq('course_id', courseId).lte('created_at', cutoff)
+        );
+        jobs.push(
+          supabase.from('submissions').delete().eq('student_id', sid).eq('course_id', courseId).is('created_at', null)
+        );
+      }
+      return jobs;
+    })
+  );
+}
+
 export async function wipeStoredCourseProgress(student, course) {
   bumpProgressEpoch();
   const moduleIds = getCourseModules(course).map((mod) => String(mod.id)).filter(Boolean);

@@ -8,11 +8,13 @@ import {
   readLocalProgressMap,
   isStatusPassing,
   isStatusFailing,
+  getCourseModules,
   getEarnedCertificates,
   isFreshCertificate,
   stampCertificateDate,
   lessonCertificateId
 } from '../utils/progress';
+import { submissionSavedAt } from '../utils/courseRestart';
 import { getAcademySettings, getDisplayName } from '../utils/academySettings';
 import CertificateCard from './CertificateCard';
 
@@ -362,6 +364,18 @@ export default function LessonView({
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
   };
 
+  const activeSubmissions = useMemo(() => {
+    if (!courseResetAt) return dbSubmissions;
+    const moduleIds = new Set(getCourseModules(course).map((mod) => String(mod.id)));
+    const courseKey = String(course?.id || courseId || '');
+    return dbSubmissions.filter((sub) => {
+      const sameCourse = (courseKey && String(sub.course_id || '') === courseKey)
+        || moduleIds.has(String(sub.module_id || ''));
+      if (!sameCourse) return true;
+      return submissionSavedAt(sub) > courseResetAt;
+    });
+  }, [dbSubmissions, courseResetAt, course, courseId]);
+
   const submissionLookup = useMemo(() => {
     const map = new Map();
     const email = currentUser?.email ? String(currentUser.email).toLowerCase() : '';
@@ -372,7 +386,7 @@ export default function LessonView({
 
       const modKey = String(mod.id);
 
-      const foundDbSub = dbSubmissions.find((sub) => {
+      const foundDbSub = activeSubmissions.find((sub) => {
         if (String(sub.module_id) !== modKey) return false;
         const subStudent = String(sub.student_id || sub.studentEmail || sub.student || '').toLowerCase();
         return (email && subStudent === email) || (id && subStudent === id);
@@ -383,7 +397,7 @@ export default function LessonView({
         return;
       }
 
-      if (Array.isArray(mod.submissions)) {
+      if (!courseResetAt && Array.isArray(mod.submissions)) {
         const sub = mod.submissions.find((s) => {
           const subEmail = String(s.studentEmail || s.student_email || s.student || '').toLowerCase();
           const subId = String(s.studentId || s.student_id || '').toLowerCase();
@@ -396,7 +410,7 @@ export default function LessonView({
     });
 
     return map;
-  }, [modules, currentUser, dbSubmissions]);
+  }, [modules, currentUser, activeSubmissions, courseResetAt]);
 
   const hasSubmittedAssignment = useCallback(
     (mod) => {
@@ -466,8 +480,8 @@ export default function LessonView({
   }, [lessonSteps, isStepComplete]);
 
   const earnedCertificates = useMemo(() => {
-    return getEarnedCertificates(course, currentUser, dbSubmissions);
-  }, [course, currentUser, dbSubmissions, readModules, watchedVideos, quizResults, certificateStamp]);
+    return getEarnedCertificates(course, currentUser, activeSubmissions);
+  }, [course, currentUser, activeSubmissions, readModules, watchedVideos, quizResults, certificateStamp]);
 
   const lessonCert = useMemo(() => {
     if (!isLessonComplete || !currentLesson) return null;
@@ -489,10 +503,10 @@ export default function LessonView({
   useEffect(() => {
     if (!progressReady || !allowCertificateAwardRef.current || !isLessonComplete || !currentLesson || !currentUser) return;
     stampCertificateDate(currentUser, lessonCertificateId(course, currentLesson));
-    const earned = getEarnedCertificates(course, currentUser, dbSubmissions);
+    const earned = getEarnedCertificates(course, currentUser, activeSubmissions);
     if (earned.course) stampCertificateDate(currentUser, earned.course.id);
     setCertificateStamp(Date.now());
-  }, [progressReady, isLessonComplete, currentLesson, currentUser, course, dbSubmissions]);
+  }, [progressReady, isLessonComplete, currentLesson, currentUser, course, activeSubmissions]);
 
   useEffect(() => {
     if (isLessonComplete) setFinishNotice('');
