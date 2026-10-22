@@ -1878,6 +1878,13 @@ a.btn-secondary {
   opacity: 0.75;
 }
 
+.lounge-stage-media {
+  position: relative;
+  flex: 1;
+  min-height: 180px;
+  display: flex;
+}
+
 .lounge-video {
   width: 100%;
   flex: 1;
@@ -1885,6 +1892,27 @@ a.btn-secondary {
   object-fit: cover;
   border-radius: 8px;
   background: #0b1220;
+}
+
+.lounge-video-screen {
+  object-fit: contain;
+  background: #070b16;
+}
+
+.lounge-video-face {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 30%;
+  max-width: 200px;
+  min-width: 96px;
+  min-height: 0;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  flex: none;
+  object-fit: cover;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
 }
 
 .lounge-voice audio {

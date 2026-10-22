@@ -14,10 +14,20 @@ function selfIdOf(user) {
   return String(user?.id || user?.email || '');
 }
 
-function hasLiveVideo(stream) {
-  return Boolean(
-    stream?.getVideoTracks().some((track) => track.readyState === 'live' && track.enabled && !track.muted)
+function liveVideoTracks(stream) {
+  return (stream?.getVideoTracks() || []).filter(
+    (track) => track.readyState === 'live' && track.enabled && !track.muted
   );
+}
+
+function chooseVideoTracks(stream, cameraTrackId, screenTrackId) {
+  const tracks = liveVideoTracks(stream);
+  const camera = cameraTrackId ? tracks.find((track) => track.id === cameraTrackId) || null : null;
+  const screen = screenTrackId ? tracks.find((track) => track.id === screenTrackId) || null : null;
+  if (camera || screen) return { camera, screen };
+  if (tracks.length === 1) return { camera: tracks[0], screen: null };
+  if (tracks.length > 1) return { screen: tracks[0], camera: tracks[1] };
+  return { camera: null, screen: null };
 }
 
 function readMembers(channel, selfId) {
@@ -32,7 +42,9 @@ function readMembers(channel, selfId) {
         id,
         name: entry.name || 'Student',
         muted: Boolean(entry.muted),
-        self: id === selfId
+        self: id === selfId,
+        cameraTrackId: entry.cameraTrackId || '',
+        screenTrackId: entry.screenTrackId || ''
       });
     });
   });
@@ -44,22 +56,46 @@ function stopStream(stream) {
   stream?.getTracks().forEach((track) => track.stop());
 }
 
-function MediaTile({ stream, video, hear }) {
+function MediaTile({ stream, cameraTrack, screenTrack, hear }) {
   const audioRef = useRef(null);
-  const videoRef = useRef(null);
+  const cameraEl = useRef(null);
+  const screenEl = useRef(null);
 
   useEffect(() => {
-    if (audioRef.current) audioRef.current.srcObject = hear ? stream : null;
+    if (audioRef.current) audioRef.current.srcObject = hear && stream ? stream : null;
   }, [stream, hear]);
 
   useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = video ? stream : null;
-  }, [stream, video]);
+    if (screenEl.current) {
+      screenEl.current.srcObject = screenTrack ? new MediaStream([screenTrack]) : null;
+    }
+  }, [screenTrack]);
+
+  useEffect(() => {
+    if (cameraEl.current) {
+      cameraEl.current.srcObject = cameraTrack ? new MediaStream([cameraTrack]) : null;
+    }
+  }, [cameraTrack]);
 
   return (
     <>
       {hear && <audio ref={audioRef} autoPlay playsInline />}
-      {video && <video ref={videoRef} className="lounge-video" autoPlay playsInline muted />}
+      {(screenTrack || cameraTrack) && (
+        <div className="lounge-stage-media">
+          {screenTrack && (
+            <video ref={screenEl} className="lounge-video lounge-video-screen" autoPlay playsInline muted />
+          )}
+          {cameraTrack && (
+            <video
+              ref={cameraEl}
+              className={`lounge-video ${screenTrack ? 'lounge-video-face' : ''}`}
+              autoPlay
+              playsInline
+              muted
+            />
+          )}
+        </div>
+      )}
     </>
   );
 }
@@ -97,6 +133,7 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   const voiceListPrimed = useRef(false);
   const sharingRef = useRef(false);
   const screenTrackRef = useRef(null);
+  const cameraTrackRef = useRef(null);
   const stageRef = useRef(null);
   const fullscreenAfterDock = useRef(false);
 
@@ -110,7 +147,7 @@ export default function LoungeVoice({ loungeId, currentUser }) {
         id: entry.id,
         name: entry.name,
         stream: entry.stream,
-        cameraOn: hasLiveVideo(entry.stream),
+        cameraOn: liveVideoTracks(entry.stream).length > 0,
         connection: entry.pc?.connectionState || 'new'
       }))
     );
@@ -135,7 +172,10 @@ export default function LoungeVoice({ loungeId, currentUser }) {
       id: selfId,
       name: nameRef.current,
       muted: mutedRef.current,
-      camera: cameraRef.current
+      camera: cameraRef.current,
+      sharing: sharingRef.current,
+      cameraTrackId: cameraRef.current && cameraTrackRef.current?.enabled ? cameraTrackRef.current.id : '',
+      screenTrackId: sharingRef.current ? screenTrackRef.current?.id || '' : ''
     });
   };
 
@@ -150,8 +190,13 @@ export default function LoungeVoice({ loungeId, currentUser }) {
   const dropCall = () => {
     sessionRef.current += 1;
     joinedRef.current = false;
+    const screenTrack = screenTrackRef.current;
     stopStream(localStreamRef.current);
+    if (screenTrack && screenTrack.readyState !== 'ended') screenTrack.stop();
     localStreamRef.current = null;
+    cameraTrackRef.current = null;
+    screenTrackRef.current = null;
+    sharingRef.current = false;
     peersRef.current.forEach(closeEntry);
     peersRef.current.clear();
     earlyIceRef.current.clear();
@@ -184,9 +229,13 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     earlyIceRef.current.delete(id);
     peersRef.current.set(id, entry);
 
-    stream?.getTracks().forEach((track) => {
+    stream?.getAudioTracks().forEach((track) => {
       if (track.readyState === 'live') pc.addTrack(track, stream);
     });
+    const cameraTrack = cameraTrackRef.current;
+    const screenTrack = screenTrackRef.current;
+    if (stream && cameraTrack?.readyState === 'live') entry.cameraSender = pc.addTrack(cameraTrack, stream);
+    if (stream && screenTrack?.readyState === 'live') entry.screenSender = pc.addTrack(screenTrack, stream);
 
     pc.onicecandidate = (event) => {
       if (!event.candidate || !joinedRef.current) return;
@@ -194,9 +243,15 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     };
 
     pc.ontrack = (event) => {
-      const remoteStream = event.streams[0] || new MediaStream([event.track]);
-      entry.stream = remoteStream;
+      if (!entry.stream) entry.stream = new MediaStream();
+      if (!entry.stream.getTracks().some((item) => item.id === event.track.id)) {
+        entry.stream.addTrack(event.track);
+      }
       watchTrack(id, event.track);
+      event.track.addEventListener('ended', () => {
+        entry.stream?.removeTrack(event.track);
+        publishPeers();
+      });
       publishPeers();
     };
 
@@ -353,6 +408,8 @@ export default function LoungeVoice({ loungeId, currentUser }) {
       dropCallRef.current();
       setJoined(false);
       setLocalStream(null);
+      setCameraOn(false);
+      setSharing(false);
       setPeers([]);
       setMembers([]);
       setReady(false);
@@ -400,9 +457,6 @@ export default function LoungeVoice({ loungeId, currentUser }) {
 
   const leave = async () => {
     const channel = channelRef.current;
-    const screenTrack = screenTrackRef.current;
-    screenTrackRef.current = null;
-    sharingRef.current = false;
     dropCall();
     setJoined(false);
     setMuted(false);
@@ -412,7 +466,6 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     setPeers([]);
     setMembers((people) => people.filter((person) => person.id !== selfId));
     setVoiceError('');
-    if (screenTrack) screenTrack.stop();
     try {
       await channel?.untrack();
     } catch (error) {
@@ -431,21 +484,39 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     }
   };
 
-  const publishVideoTrack = async (track) => {
+  const publishTracks = async () => {
     const stream = localStreamRef.current;
     if (!stream) return;
-    let added = false;
+    let changed = false;
+    const roles = [
+      ['cameraSender', cameraTrackRef.current],
+      ['screenSender', screenTrackRef.current]
+    ];
     for (const [, entry] of peersRef.current) {
-      const sender = entry.pc.getSenders().find((item) => item.track?.kind === 'video');
-      if (sender) await sender.replaceTrack(track);
-      else if (track) {
-        entry.pc.addTrack(track, stream);
-        added = true;
+      if (!entry.pc || entry.pc.signalingState === 'closed') continue;
+      for (const [key, track] of roles) {
+        const live = Boolean(track && track.readyState === 'live');
+        if (live && !stream.getTracks().includes(track)) stream.addTrack(track);
+        if (live) {
+          if (!entry[key]) {
+            entry[key] = entry.pc.addTrack(track, stream);
+            changed = true;
+          } else if (entry[key].track !== track) {
+            await entry[key].replaceTrack(track);
+          }
+        } else if (entry[key]) {
+          try {
+            entry.pc.removeTrack(entry[key]);
+          } catch (error) {
+            console.error('Could not stop a video track', error);
+          }
+          entry[key] = null;
+          changed = true;
+        }
       }
     }
-    if (track && !stream.getTracks().includes(track)) stream.addTrack(track);
     setLocalStream(stream);
-    if (added || !track) await renegotiate();
+    if (changed) await renegotiate();
   };
 
   const stopScreen = async () => {
@@ -455,11 +526,15 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     sharingRef.current = false;
     setSharing(false);
     if (track) {
-      const stream = localStreamRef.current;
-      if (stream?.getTracks().includes(track)) stream.removeTrack(track);
+      localStreamRef.current?.removeTrack(track);
       track.stop();
     }
-    await publishVideoTrack(null);
+    await publishTracks();
+    try {
+      await announce();
+    } catch (error) {
+      console.error('Could not update screen share', error);
+    }
   };
 
   const toggleShare = async () => {
@@ -473,19 +548,16 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     try {
       const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       const track = display.getVideoTracks()[0];
-      stream.getVideoTracks().forEach((existing) => {
-        stream.removeTrack(existing);
-        existing.stop();
-      });
+      track.contentHint = 'detail';
       track.addEventListener('ended', () => {
         stopScreen();
       });
       screenTrackRef.current = track;
+      if (!stream.getTracks().includes(track)) stream.addTrack(track);
       sharingRef.current = true;
-      cameraRef.current = false;
-      setCameraOn(false);
       setSharing(true);
-      await publishVideoTrack(track);
+      await publishTracks();
+      await announce();
     } catch (error) {
       if (error?.name === 'NotAllowedError' || error?.name === 'AbortError') {
         setVoiceError('');
@@ -513,20 +585,9 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     const stream = localStreamRef.current;
     if (!stream) return;
     setVoiceError('');
-    if (sharingRef.current) {
-      const screenTrack = screenTrackRef.current;
-      screenTrackRef.current = null;
-      sharingRef.current = false;
-      setSharing(false);
-      if (screenTrack) {
-        stream.removeTrack(screenTrack);
-        screenTrack.stop();
-      }
-    }
-    const existing = stream.getVideoTracks()[0];
-
     try {
-      if (cameraRef.current && existing) {
+      const existing = cameraTrackRef.current;
+      if (cameraRef.current && existing && existing.readyState === 'live') {
         existing.enabled = false;
         cameraRef.current = false;
         setCameraOn(false);
@@ -535,29 +596,34 @@ export default function LoungeVoice({ loungeId, currentUser }) {
         return;
       }
 
-      if (existing) {
+      if (existing && existing.readyState === 'live') {
         existing.enabled = true;
+        if (!stream.getTracks().includes(existing)) stream.addTrack(existing);
         cameraRef.current = true;
         setCameraOn(true);
+        setLocalStream(stream);
+        await publishTracks();
         await announce();
         return;
       }
 
-      const camera = await navigator.mediaDevices.getUserMedia({ video: true });
+      const camera = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       const track = camera.getVideoTracks()[0];
-      stream.addTrack(track);
+      track.contentHint = 'motion';
+      track.addEventListener('ended', () => {
+        if (cameraTrackRef.current !== track) return;
+        cameraTrackRef.current = null;
+        cameraRef.current = false;
+        setCameraOn(false);
+        announce().catch((error) => console.error('Could not update the camera', error));
+        publishPeers();
+      });
+      cameraTrackRef.current = track;
+      if (!stream.getTracks().includes(track)) stream.addTrack(track);
       cameraRef.current = true;
       setCameraOn(true);
       setLocalStream(stream);
-
-      const session = sessionRef.current;
-      for (const [id, entry] of peersRef.current) {
-        entry.pc.addTrack(track, stream);
-        const offer = await entry.pc.createOffer();
-        if (session !== sessionRef.current) return;
-        await entry.pc.setLocalDescription(offer);
-        sendSignal({ kind: 'offer', to: id, sdp: entry.pc.localDescription });
-      }
+      await publishTracks();
       await announce();
     } catch (error) {
       if (error?.name === 'NotAllowedError') {
@@ -658,15 +724,30 @@ export default function LoungeVoice({ loungeId, currentUser }) {
     setPipWindow(pip);
   };
 
-  const tiles = members 
-      .filter((member) => joined || !member.self)
-      .map((member) => {
-        const peer = peers.find((item) => item.id === member.id);
-        const isMuted = member.self ? muted : member.muted;
-        const showVideo = member.self ? (cameraOn || sharing) : Boolean(peer?.cameraOn);
-        const stream = member.self ? localStream : peer?.stream;
-        return { member, peer, isMuted, showVideo, stream }
-  });
+  const tiles = members
+    .filter((member) => joined || !member.self)
+    .map((member) => {
+      const peer = peers.find((item) => item.id === member.id);
+      const isMuted = member.self ? muted : member.muted;
+      const stream = member.self ? localStream : peer?.stream;
+      const cameraTrackId = member.self
+        ? (cameraOn && cameraTrackRef.current?.enabled ? cameraTrackRef.current.id : '')
+        : member.cameraTrackId;
+      const screenTrackId = member.self
+        ? (sharing ? screenTrackRef.current?.id || '' : '')
+        : member.screenTrackId;
+      const { camera, screen } = chooseVideoTracks(stream, cameraTrackId, screenTrackId);
+      const role = screen && camera
+        ? 'Camera + screen'
+        : screen
+          ? 'Screen'
+          : camera
+            ? 'On camera'
+            : isMuted
+              ? 'Muted'
+              : 'Live';
+      return { member, peer, isMuted, stream, camera, screen, role };
+    });
 
   const stage = (
     <div className={`lounge-stage ${pipWindow ? 'is-popped' : ''}`} ref={stageRef}>
@@ -684,19 +765,19 @@ export default function LoungeVoice({ loungeId, currentUser }) {
             <p>Nobody is in voice yet.</p>
           </div>
         )}
-        {tiles.map(({ member, peer, isMuted, showVideo, stream }) => (
+        {tiles.map(({ member, peer, isMuted, stream, camera, screen, role }) => (
           <article key={member.id} className='lounge-stage-card'>
             <p className='lounge-voice-name'>
               <span className={`lounge-voice-dot ${isMuted ? 'is-muted' : ''}`} />
               <strong>{member.self ? 'You' : member.name}</strong>
-              <span className='lounge-role'>
-                {member.self && sharing ? 'Screen' : isMuted ? 'Muted' : 'Live'}
-              </span>
+              <span className='lounge-role'>{role}</span>
             </p>
             {joined && !member.self && peer && peer.connection !== 'connected' && (
               <p className='lounge-voice-status'>Connecting...</p>
             )}
-            {stream && <MediaTile stream={stream} video={showVideo} hear={!member.self} />}
+            {stream && (
+              <MediaTile stream={stream} cameraTrack={camera} screenTrack={screen} hear={!member.self} />
+            )}
           </article>
         ))}
       </div>
