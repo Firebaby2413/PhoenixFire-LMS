@@ -243,7 +243,7 @@ export default function LiveClasses({
         </p>
       )}
       {isHost && (
-        <form className="course-box live-class-form" onSubmit={handleSubmit}>
+        <form className="course-box live-class-form" onSubmit={handleSubmit} noValidate>
           <h2 className="section-subheading span-2">
             {editingId ? 'Edit live class' : 'Schedule a live class'}
           </h2>
@@ -304,7 +304,7 @@ export default function LiveClasses({
             Meeting link
             <input
               className="input-wide"
-              type="url"
+              type="text"
               value={form.meetingUrl}
               onChange={(event) => updateField('meetingUrl', event.target.value)}
               placeholder="Optional outside link"
@@ -315,7 +315,7 @@ export default function LiveClasses({
             Recording link (optional)
             <input
               className="input-wide"
-              type="url"
+              type="text"
               value={form.recordingUrl}
               onChange={(event) => updateField('recordingUrl', event.target.value)}
               placeholder="https://www.youtube.com/watch?v=..."
