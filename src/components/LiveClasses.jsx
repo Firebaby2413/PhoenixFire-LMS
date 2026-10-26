@@ -12,8 +12,8 @@ import {
   studentsForCourse,
   toDatetimeLocalValue
 } from '../utils/liveClasses';
-import { deleteLiveClass, upsertLiveClass } from '../utils/liveClassService';
-
+import ClassRoom from './ClassRoom';
+import { deleteLiveClass, recordingPlaybackUrl, upsertLiveClass } from '../utils/liveClassService';
 const EMPTY_FORM = {
   title: '',
   courseId: '',
@@ -49,7 +49,8 @@ export default function LiveClasses({
   const [error, setError] = useState('');
   const [remoteNote, setRemoteNote] = useState('');
   const [filter, setFilter] = useState('upcoming');
-
+  const [openClassId, setOpenClassId] = useState(null);
+  const isAdmin = String(currentUser?.role || '').toLowerCase() === 'admin';
   const isHost = canHostLiveClass(currentUser);
   const hostCourses = useMemo(
     () => coursesHostCanSchedule(courses, currentUser),
@@ -146,7 +147,7 @@ export default function LiveClasses({
       setError('Duration must be between 15 and 240 minutes.');
       return;
     }
-    if (!isHttpUrl(meetingUrl)) {
+    if (meetingUrl && !isHttpUrl(meetingUrl)) {
       setError('Meeting link must start with http:// or https://.');
       return;
     }
@@ -247,7 +248,7 @@ export default function LiveClasses({
             {editingId ? 'Edit live class' : 'Schedule a live class'}
           </h2>
           <p className="span-2 live-class-note">
-            Paste a Zoom, Google Meet, or Teams link. Students enrolled in the course get a Join button.
+            Leave the meeting link blank to hold live class on this site. A Zoom, Meet, or Teams link is optional.
           </p>
 
           <label className="live-class-field">
@@ -306,7 +307,7 @@ export default function LiveClasses({
               type="url"
               value={form.meetingUrl}
               onChange={(event) => updateField('meetingUrl', event.target.value)}
-              placeholder="https://meet.google.com/..."
+              placeholder="Optional outside link"
             />
           </label>
 
@@ -385,7 +386,9 @@ export default function LiveClasses({
         const course = courseById.get(session.courseId);
         const manageable = canManageSession(currentUser, session, course);
         const embedUrl = getYouTubeEmbedUrl(session.recordingUrl);
-        const showJoin = session.timing !== 'cancelled' && session.timing !== 'ended' && session.meetingUrl;
+        const showOutsideJoin = session.timing !== 'cancelled' && session.timing !== 'ended' && session.meetingUrl;
+        const showSiteJoin = session.timing === 'upcoming' || session.timing === 'live';
+        const roomOpen = openClassId === session.id;
         const unpublished = course && course.status && course.status !== 'published';
 
         return (
@@ -410,14 +413,14 @@ export default function LiveClasses({
             )}
 
             <div className="course-actions">
-              {showJoin && (
-                <a
-                  className="btn btn-inline"
-                  href={session.meetingUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Join class
+              {showSiteJoin && (
+                <button type="button" className="btn btn-inline" onClick={() => setOpenClassId(session.id)}>
+                  Join on this site
+                </button>
+              )}
+              {showOutsideJoin && (
+                <a className="btn-secondary btn-inline" href={session.meetingUrl} target="_blank" rel="noopener noreferrer">
+                  Open outside link
                 </a>
               )}
               {session.recordingUrl && !embedUrl && (
@@ -429,6 +432,18 @@ export default function LiveClasses({
                 >
                   Watch recording
                 </a>
+              )}
+              {isAdmin && String(session.recordingUrl || '').startsWith('storage:class-recordings/') && (
+                <button
+                  type="button"
+                  className="btn-secondary btn-inline"
+                  onClick={async () => {
+                    const url = await recordingPlaybackUrl(session.recordingUrl);
+                    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                  }}
+                >
+                  Review recording
+                </button>
               )}
               {manageable && (
                 <>
@@ -456,6 +471,20 @@ export default function LiveClasses({
                   allowFullScreen
                 />
               </div>
+            )}
+            {roomOpen && (
+              <ClassRoom
+                session={session}
+                currentUser={currentUser}
+                canRecord={manageable}
+                onRecordingSaved={(path) => {
+                  if (path === 'close') {
+                    setOpenClassId(null);
+                    return;
+                  }
+                  commitSession({ ...session, recordingUrl: path, updatedAt: new Date().toISOString() }, session.id);
+                }}
+              />
             )}
           </article>
         );

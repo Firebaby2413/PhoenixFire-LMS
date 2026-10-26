@@ -170,3 +170,24 @@ export function subscribeLiveClasses(onRows) {
 
   return channel;
 }
+
+export async function uploadClassRecording(sessionId, blob) {
+  const path = `${sessionId}/${Date.now()}.webm`;
+  const { error } = await supabase.storage.from(`class-recordings`).upload(path, blob, {
+    contentType: blob.type || 'video/webm',
+    upsert: false
+  });
+  if (error) return { ok: false, message: error.message, path: ''};
+  return { ok: true, message: '', path: `storage:class-recordings/${path}` };
+}
+
+export async function recordingPlaybackUrl(recordingUrl) {
+  const prefix = 'storage:class-recordings/';
+  if (!String(recordingUrl || '').startsWith(prefix)) return recordingUrl || '';
+  const path = String(recordingUrl).slice(prefix.length);
+  const { data, error } = await supabase.storage
+    .from('class-recordings')
+    .createSignedUrl(path, 60 * 60);
+    if (error) return '';
+    return data.signedUrl;
+}
