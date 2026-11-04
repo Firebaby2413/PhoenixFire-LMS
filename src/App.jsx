@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
+import AppHeader from './components/AppHeader';
+import AuthScreen from './components/AuthScreen';
 import Sidebar from './components/Sidebar';
 import StudentBoard from './components/StudentProgressBoard';
-import CourseEditor from './components/CourseEditor';
+import CourseManagementPage from './components/CourseManagementPage';
 import CourseList from './components/CourseList';
 import LessonView from './components/LessonView';
 import CourseOutline from './components/CourseOutline';
@@ -13,54 +15,21 @@ import Dashboard from './components/Dashboard';
 import Settings from './components/Settings';
 import LiveClasses from './components/LiveClasses';
 import StudentLounge from './components/StudentLounge';
-import { readLiveClasses, LIVE_CLASSES_KEY } from './utils/liveClasses';
-import { fetchLiveClasses, migrateLocalLiveClasses, subscribeLiveClasses } from './utils/liveClassService';
-import { supabase } from './utils/supabaseClient';
 
+import { supabase } from './utils/supabaseClient';
 import { useAuth } from './context/AuthContext';
 import { exportData, importData, deleteCourse } from './utils/storage';
-import { withModuleClassification } from './utils/moduleTypes';
-import { getAcademySettings, validateAccountKeyRemote } from './utils/academySettings';
+import { validateAccountKeyRemote } from './utils/academySettings';
 import { useMessageInbox } from './hooks/useMessageInbox';
 import { profileFromRow } from './utils/profileShape';
-import { loadCourses, saveCourse, uploadCourses } from './utils/courseService';
+import { saveCourse } from './utils/courseService';
 import { applyApprovedRestarts } from './utils/courseRestart';
-import phoenixLogo from './assets/Images/phoenix.jpg';
+
+import { useAppNavigation } from './hooks/useAppNavigation';
+import { sanitizeCourses, useAcademyData } from './hooks/useAcademyData';
 import './styles.css';
 
-// Helper function to sanitize courses and strip orphaned/placeholder modules
-const sanitizeCourses = (rawCourses) => {
-  if (!Array.isArray(rawCourses)) return [];
-  
-  return rawCourses.map((course) => {
-    if (!course || !course.lessons) return course;
 
-    return {
-      ...course,
-      lessons: course.lessons.map((lesson) => {
-        if (!lesson || !lesson.modules) return lesson;
-
-        return {
-          ...lesson,
-          modules: lesson.modules
-            .filter((mod) => {
-              const modTitle = mod.title || mod.name || '';
-              if (!mod.id || modTitle === 'New Module') {
-                return false;
-              }
-              return true;
-            })
-            .map((mod) => {
-              const rest = { ...mod };
-              delete rest.completed;
-              delete rest.isCompleted;
-              return withModuleClassification(rest);
-            }),
-        };
-      }),
-    };
-  });
-};
 
 export default function App() {
   const {
@@ -71,177 +40,40 @@ export default function App() {
     refreshUser
   } = useAuth() || {};
 
-  const [users, setUsers] = useState(() => {
-    try {
-      const saved = localStorage.getItem('app_users');
-      return saved ? JSON.parse(saved) : [];
-    } catch (e) {
-      console.error('Failed to parse users from localStorage', e);
-      return [];
-    }
-  });
-
-  const [courses, setCourses] = useState(() => {
-    try {
-      const saved = localStorage.getItem('app_courses');
-      const parsed = saved ? JSON.parse(saved) : [];
-      return sanitizeCourses(parsed);
-    } catch (e) {
-      console.error('Failed to parse courses from localStorage', e);
-      return [];
-    }
-  });
-
-  const [localUser, setLocalUser] = useState(null);
-  const [liveClasses, setLiveClasses] = useState(() => readLiveClasses());
-  const [liveClassNotice, setLiveClassNotice] = useState('');
-
-  useEffect(() => {
-    localStorage.setItem('app_users', JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
-    localStorage.setItem('app_courses', JSON.stringify(courses));
-  }, [courses]);
-
-  useEffect(() => {
-    localStorage.setItem(LIVE_CLASSES_KEY, JSON.stringify(liveClasses));
-  }, [liveClasses]);
-
-  useEffect(() => {
-    const handleStorage = (event) => {
-      if (event.key === LIVE_CLASSES_KEY && event.newValue) {
-        try {
-          const parsed = JSON.parse(event.newValue);
-          if (Array.isArray(parsed)) setLiveClasses(parsed);
-        } catch (err) {
-          console.error('Failed to sync live classes', err);
-        }
-      }
-    };
-    window.addEventListener('storage', handleStorage);
-    return () => window.removeEventListener('storage', handleStorage);
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    const user = authUser || localUser;
-
-    (async () => {
-      const remote = await fetchLiveClasses();
-      if (cancelled) return;
-      if (!remote.ok) {
-        if (remote.missingTable) setLiveClassNotice(remote.message);
-        return;
-      }
-
-      if (remote.rows.length === 0) {
-        const migrated = await migrateLocalLiveClasses(user);
-        if (cancelled || !migrated.ok) return;
-        setLiveClassNotice('');
-        setLiveClasses(migrated.rows);
-        return;
-      }
-
-      setLiveClassNotice('');
-      setLiveClasses(remote.rows);
-    })();
-
-    const channel = subscribeLiveClasses((rows) => {
-      if (cancelled) return;
-      setLiveClassNotice('');
-      setLiveClasses(rows);
-    });
-
-    return () => {
-      cancelled = true;
-      supabase.removeChannel(channel);
-    };
-  }, [authUser, localUser]);
-
-  useEffect(() => {
-    if (!authUser?.id) return undefined;
-    let cancelled = false;
-
-    supabase.from('profiles').select('*').then(({ data, error }) => {
-      if (cancelled || error) {
-        if (error) console.error('Could not load profiles:', error.message);
-        return;
-      }
-      const rows = (data || []).map(profileFromRow).filter(Boolean);
-      if (!rows.some((user) => user.id === authUser.id)) {
-        rows.push(profileFromRow({
-          id: authUser.id,
-          email: authUser.email,
-          role: authUser.role,
-          first_name: authUser.firstName,
-          last_name: authUser.lastName,
-          student_id: authUser.studentId
-        }));
-      }
-
-      setUsers(rows);
-    });
-
-    loadCourses().then(async (result) => {
-      if (cancelled || !result.ok) return;
-      if (result.rows.length > 0) {
-        setCourses(sanitizeCourses(result.rows));
-        return;
-      }
-
-      const role = String(authUser.role || '').toLowerCase();
-      const canUpload = ['admin', 'mentor', 'instructor'].includes(role);
-      if (!canUpload) return;
-
-      let localCourses = [];
-      try {
-        const saved = JSON.parse(localStorage.getItem('app_courses') || '[]');
-        if (Array.isArray(saved)) localCourses = sanitizeCourses(saved);
-      } catch (err) {
-        console.error('Could not read saved courses:', err);
-      }
-      if (localCourses.length === 0) return;
-
-      try {
-        const uploaded = await uploadCourses(localCourses);
-        if (!cancelled && uploaded.length > 0) setCourses(sanitizeCourses(uploaded));
-      } catch (err) {
-        console.error('Could not store courses in Supabase:', err);
-      }
-    });
-
-    if (String(authUser.role || '').toLowerCase() === 'admin') {
-      supabase.from('academy_settings').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
-        if (cancelled || !data) return;
-        setAcademySettings({
-          academyName: data.academy_name,
-          ownerKey: data.owner_key,
-          enrollmentKey: data.enrollment_key
-        });
-      });
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [authUser]);
-
-
-  const [view, setView] = useState('dashboard');
-  const [authView, setAuthView] = useState('signin');
-  const [theme, setTheme] = useState('dark');
-  const [academySettings, setAcademySettings] = useState(() => getAcademySettings());
-  const [selectedCourseId, setSelectedCourseId] = useState(null);
-  const [activeLessonId, setActiveLessonId] = useState(null);
-  const [resumeStepIndex, setResumeStepIndex] = useState(0);
-  const [skipAutoResume, setSkipAutoResume] = useState(false);
-  const [editingCourse, setEditingCourse] = useState(null);
-  const [progressRevision, setProgressRevision] = useState(0);
-
-  useEffect(() => {
-    document.body.className = theme === 'dark' ? 'dark-theme' : 'light-theme';
-  }, [theme]);
+  const {
+    users,
+    setUsers,
+    courses,
+    setCourses,
+    localUser,
+    setLocalUser,
+    liveClasses,
+    setLiveClasses,
+    liveClassNotice,
+    academySettings,
+    setAcademySettings
+  } = useAcademyData(authUser);
+  
+  const {
+    view,
+    setView,
+    authView,
+    setAuthView,
+    theme,
+    setTheme,
+    selectedCourseId,
+    setSelectedCourseId,
+    activeLessonId,
+    setActiveLessonId,
+    resumeStepIndex,
+    setResumeStepIndex,
+    skipAutoResume,
+    setSkipAutoResume,
+    editingCourse,
+    setEditingCourse,
+    progressRevision,
+    setProgressRevision
+  } = useAppNavigation();
 
   const activeUser = authUser || localUser;
   const messageInbox = useMessageInbox(activeUser, users);
@@ -447,18 +279,11 @@ export default function App() {
         />
 
         <main id='content' className={fillsWindow ? 'content-messages' : undefined}>
-          <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-            <h1 className='pf-title bg-gradient-to-r from-orange-400 via-pink-500 to-purple-500 bg-clip-text text-transparent' style={{ margin: 0 }}>
-              {viewTitles[view] || view}
-            </h1>
-            <button
-              className='theme-toggle'
-              style={{ position: 'static' }}
-              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-            >
-              {theme === 'dark' ? '☀️' : '🌙'}
-            </button>
-          </header>
+          <AppHeader
+            title={viewTitles[view] || view}
+            theme={theme}
+            onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+          />
 
           <div className='content-body'>
             {view === 'dashboard' && (
@@ -489,76 +314,18 @@ export default function App() {
             )}
 
             {view === 'course-management' && isStaff && (
-              <div className="course-management-container">
-                <div className="flex justify-between items-center mb-6">
-                  {!editingCourse && (
-                    <button
-                      onClick={() => {
-                        const newCourse = {
-                          id: `course_${Date.now()}`,
-                          title: 'Untitled New Course',
-                          description: '',
-                          status: 'draft',
-                          mentorKey: activeUser?.email || '',
-                          assignedStudentKeys: [],
-                          lessons: [
-                            {
-                              id: `lesson_${Date.now()}`,
-                              title: 'Module 1: Introduction',
-                              description: '',
-                              modules: []
-                            }
-                          ]
-                        };
-                        setEditingCourse(newCourse);
-                      }}
-                      className="btn-primary flex items-center gap-2 px-4 py-2 rounded-lg bg-gradient-to-r from-orange-500 to-pink-500 text-white font-semibold"
-                    >
-                      <span>+</span> Create New Course
-                    </button>
-                  )}
-                </div>
-
-                {editingCourse ? (
-                  <div>
-                    <button
-                      onClick={() => setEditingCourse(null)}
-                      className="mb-4 text-sm text-gray-400 hover:text-white flex items-center gap-1"
-                    >
-                      ← Back to Course Management
-                    </button>
-
-                    <CourseEditor
-                      course={editingCourse}
-                      users={users}
-                      currentUser={activeUser}
-                      onSave={async (updatedCourse) => {
-                        const saved = await persistCourse(updatedCourse);
-                        if (saved) setEditingCourse(null);
-                      }}
-                      onCancel={() => setEditingCourse(null)}
-                    />
-                  </div>
-                ) : (
-                  <CourseList
-                    courses={courses}
-                    currentUser={activeUser}
-                    users={users}
-                    onEditCourse={(course) => setEditingCourse(course)}
-                    onDeleteCourse={(courseOrId) => {
-                      const course = typeof courseOrId === 'object'
-                        ? courseOrId
-                        : courses.find((item) => item.id === courseOrId);
-                      if (course && window.confirm('Are you sure you want to delete this course?')) {
-                        handleDeleteCourse(course);
-                      }
-                    }}
-                    onApproveCourse={handleApproveCourse}
-                    onSelectCourse={handleCourseSelection}
-                    refreshKey={progressRevision}
-                  />
-                )}
-              </div>
+              <CourseManagementPage
+                editingCourse={editingCourse}
+                setEditingCourse={setEditingCourse}
+                activeUser={activeUser}
+                users={users}
+                courses={courses}
+                progressRevision={progressRevision}
+                onSaveCourse={persistCourse}
+                onDeleteCourse={handleDeleteCourse}
+                onApproveCourse={handleApproveCourse}
+                onSelectCourse={handleCourseSelection}
+              />
             )}
 
             {view === 'course-outline' && (
@@ -751,198 +518,6 @@ export default function App() {
 
           </div>
         </main>
-      </div>
-    </div>
-  );
-}
-
-function AuthScreen({ view, setView, onSignIn, onCreate, onResetPassword, theme, setTheme }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [studentId, setStudentId] = useState('');
-  const [role, setRole] = useState('student');
-  const [ownerKey, setOwnerKey] = useState('');
-  const [securityQuestion, setSecurityQuestion] = useState('');
-  const [securityAnswer, setSecurityAnswer] = useState('');
-
-  const handleResetSubmit = (e) => {
-    e.preventDefault();
-    onResetPassword(email);
-  };
-
-  const handleSignInSubmit = (e) => {
-    e.preventDefault();
-    onSignIn(email, password);
-  };
-
-  const handleCreateSubmit = (e) => {
-    e.preventDefault();
-    onCreate(email, password, role, ownerKey, {
-      firstName,
-      lastName,
-      studentId,
-      securityQuestion,
-      securityAnswer
-    });
-  };
-
-  return (
-    <div id='auth-container'>
-      <div id='auth-card'>
-        <button
-          type='button'
-          className='theme-toggle'
-          onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-        >
-          {theme === 'dark' ? '🌙' : '☀️'}
-        </button>
-
-        <img
-          src={phoenixLogo}
-          alt='Phoenix Fire Technical Academy'
-          className='auth-logo'
-        />
-        <h1 className='app-title'>Phoenix Fire Technical Academy</h1>
-
-        {view === 'signin' && (
-          <form onSubmit={handleSignInSubmit}>
-            <h2>Sign In</h2>
-            <input
-              className='input-wide'
-              placeholder='Email'
-              type='email'
-              autoComplete='email'
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <input
-              className='input-wide'
-              type='password'
-              placeholder='Password'
-              autoComplete='current-password'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <button type='submit' className='btn'>
-              Sign In
-            </button>
-            <button type='button' className='btn-secondary' onClick={() => setView('forgot')}>
-              Forgot Password?
-            </button>
-            <button type='button' className='btn-secondary' onClick={() => setView('create')}>
-              Create Account
-            </button>
-          </form>
-        )}
-
-        {view === 'forgot' && (
-          <form onSubmit={handleResetSubmit}>
-            <h2>Reset Password</h2>
-            <input
-              className='input-wide'
-              placeholder='Email'
-              type='email'
-              autoComplete='email'
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <button type='submit' className='btn'>
-              Email Reset Link
-            </button>
-            <button type='button' className='btn-secondary' onClick={() => setView('signin')}>
-              Back to Sign In
-            </button>
-          </form>
-        )}
-
-        {view === 'create' && (
-          <form onSubmit={handleCreateSubmit}>
-            <h2>Create Account</h2>
-            <input
-              className='input-wide'
-              placeholder='First Name'
-              autoComplete='given-name'
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-            />
-            <input
-              className='input-wide'
-              placeholder='Last Name'
-              autoComplete='family-name'
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-            />
-            <input
-              className='input-wide'
-              placeholder='Student ID'
-              value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
-            />
-            <input
-              className='input-wide'
-              placeholder='Email'
-              type='email'
-              autoComplete='email'
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <input
-              className='input-wide'
-              type='password'
-              placeholder='Password'
-              autoComplete='new-password'
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-            <select
-              className='input-wide'
-              value={securityQuestion}
-              onChange={(e) => setSecurityQuestion(e.target.value)}
-            >
-              <option value=''>Select Security Question</option>
-              <option value='What was the name of your first pet?'>
-                What was the name of your first pet?
-              </option>
-              <option value='What city were you born in?'>
-                What city were you born in?
-              </option>
-              <option value='What was your first car?'>
-                What was your first car?
-              </option>
-            </select>
-            <input
-              className='input-wide'
-              placeholder='Security Answer'
-              value={securityAnswer}
-              onChange={(e) => setSecurityAnswer(e.target.value)}
-            />
-            <select
-              className='input-wide'
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-            >
-              <option value='student'>Student</option>
-              <option value='ta'>TA</option>
-              <option value='instructor'>Instructor</option>
-              <option value='mentor'>Mentor</option>
-              <option value='admin'>Admin</option>
-            </select>
-            <input
-              className='input-wide'
-              placeholder={role === 'admin' ? 'Owner Key' : 'Enrollment Key'}
-              value={ownerKey}
-              onChange={(e) => setOwnerKey(e.target.value)}
-            />
-            <button type='submit' className='btn'>
-              Create Account
-            </button>
-            <button type='button' className='btn-secondary' onClick={() => setView('signin')}>
-              Back
-            </button>
-          </form>
-        )}
       </div>
     </div>
   );

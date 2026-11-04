@@ -1,29 +1,16 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import MarkdownPreview from './MarkdownPreview';
-import { submitAssignment, fetchAllSubmissions, supabase } from '../utils/storage';
-import { isReadingModule, getModuleRepoUrl, getModuleQuizItems, getModuleSteps } from '../utils/moduleTypes';
-import { 
-  writeLocalProgressFlag,
-  clearLocalCourseProgress,
-  readLocalProgressMap,
-  isStatusPassing,
-  isStatusFailing,
-  getCourseModules,
-  getEarnedCertificates,
-  isFreshCertificate,
-  stampCertificateDate,
-  lessonCertificateId
-} from '../utils/progress';
-import { submissionSavedAt } from '../utils/courseRestart';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { isStatusFailing, getEarnedCertificates, isFreshCertificate, stampCertificateDate, lessonCertificateId } from '../utils/progress';
+import { getModuleRepoUrl, getModuleQuizItems } from '../utils/moduleTypes';
 import { getAcademySettings, getDisplayName } from '../utils/academySettings';
-import CertificateCard from './CertificateCard';
-
-
-function getQuizAnswerKey(moduleId, question, index) {
-  return `${moduleId}_${question.id || index}`;
-}
-
-const QUIZ_PASSING_PERCENT = 90;
+import { buildLessonSteps, useLessonProgress } from '../hooks/useLessonProgress';
+import { useLessonSubmissions } from '../hooks/useLessonSubmissions';
+import LessonHeader from './LessonHeader';
+import LessonStepFrame from './LessonStepFrame';
+import LessonFinishPanel from './LessonFinishPanel';
+import ReadingStep from './ReadingStep';
+import VideoStep from './VideoStep';
+import AssignmentStep from './AssignmentStep';
+import QuizStep from './QuizStep';
 
 function getVideoEmbedUrl(url) {
   if (!url) return '';
@@ -37,117 +24,12 @@ function getVideoEmbedUrl(url) {
       const id = parsed.searchParams.get('v');
       if (id) return `https://www.youtube.com/embed/${id}`;
     }
-  } catch (e) {
+  } catch {
     // not a valid URL
   }
   return url;
 }
 
-function buildLessonSteps(modules) {
-  const list = [];
-  modules.forEach((mod, moduleIndex) => {
-    getModuleSteps(mod).forEach((kind) => {
-      list.push({ kind, mod, moduleIndex });
-    });
-  });
-  return list;
-}
-
-function isStepDoneInMaps(step, readMap, watchMap, quizMap) {
-  const modId = String(step.mod.id);
-  if (step.kind === 'reading') {
-    return !!(readMap[modId] || readMap[step.mod.id]);
-  }
-  if(step.kind === 'video') {
-    return !!(watchMap[modId] || watchMap[step.mod.id]);
-  }
-  if (step.kind === 'quiz') {
-    const entry = quizMap[modId] ?? quizMap[step.mod.id];
-    if (entry === true) return true;
-    return !!(entry && (entry.passed === true || Number(entry.percent) >= 90));
-  }
-  return false;
-}
-
-function answersMatch(studentAnswer, correctAnswer) {
-  return (
-    String(studentAnswer || '').trim().toLowerCase() ===
-    String(correctAnswer || '').trim().toLowerCase()
-  );
-}
-
-function scoreQuiz(questions, answers, moduleId) {
-  let correct = 0;
-  questions.forEach((q, index) => {
-    const key = getQuizAnswerKey(moduleId, q, index);
-    if (answersMatch(answers[key], q.answer)) {
-      correct += 1;
-    }
-  });
-  const total = questions.length;
-  const percent = total === 0 ? 0 : Math.round((correct / total) * 100);
-  return {
-    correct,
-    total,
-    percent,
-    passed: percent >= QUIZ_PASSING_PERCENT
-  };
-}
-
-function StudentQuizQuestion({ question, answer, onChange, groupName }) {
-  const prompt = question.question || question.text || '';
-  const type = String(question.type || '').toLowerCase();
-  const options = Array.isArray(question.options)
-    ? question.options.filter((opt) => String(opt).trim() !== '')
-    : [];
-  const showChoices =
-    type === 'multiple_choice' || type === 'true_false' || options.length > 0;
-  return (
-    <div style={{ marginBottom: '12px' }}>
-      <p style={{ fontWeight: 'bold', fontSize: '14px', marginBottom: '8px' }}>{prompt}</p>
-
-      {showChoices ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {options.map((opt, optIdx) => {
-            const checked = answer === opt;
-            return (
-              <label
-                key={`${groupName}_${optIdx}`}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  background: checked ? 'rgba(249, 115, 22, 0.15)' : '#0f172a',
-                  border: `1px solid ${checked ? '#f97316' : '#475569'}`,
-                  borderRadius: '6px',
-                  padding: '8px 12px',
-                  cursor: 'pointer'
-                }}
-              >
-                <input
-                  type="radio"
-                  name={groupName}
-                  value={opt}
-                  checked={checked}
-                  onChange={() => onChange(opt)}
-                />
-                <span>{opt}</span>
-              </label>
-            );
-          })}
-        </div>
-      ) : (
-        <input
-          type="text"
-          placeholder="Type your answer..."
-          value={answer || ''}
-          onChange={(e) => onChange(e.target.value)}
-          style={{ width: '100%', background: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: '#fff', padding: '8px 12px' }}
-        />
-      )}
-    </div>
-  );
-}
 export default function LessonView({
   course,
   lesson: initialLesson,
@@ -161,190 +43,64 @@ export default function LessonView({
   skipAutoResume = false
 }) {
   const [currentLesson, setCurrentLesson] = useState(initialLesson);
-
-  const [prevInitialLesson, setPrevInitialLesson] = useState(initialLesson);
-  if (initialLesson !== prevInitialLesson) {
-    setPrevInitialLesson(initialLesson);
-    setCurrentLesson(initialLesson);
-  }
-
-  const [submissionInputs, setSubmissionInputs] = useState({});
-  const [readModules, setReadModules] = useState({});
-  const [dbSubmissions, setDbSubmissions] = useState([]);
-  const [quizAnswers, setQuizAnswers] = useState({});
-  const [quizResults, setQuizResults] = useState({});
-  const [visibleStepIndex, setVisibleStepIndex] = useState(resumeStepIndex);
-  const [watchedVideos, setWatchedVideos] = useState({});
-  const [finishNotice, setFinishNotice] = useState('');
-  const [finishScrollTick, setFinishScrollTick] = useState(0);
-  const [courseResetAt, setCourseResetAt] = useState(0);
-  const [progressReady, setProgressReady] = useState(0);
   const [certificateStamp, setCertificateStamp] = useState(0);
-  const allowCertificateAwardRef = useRef(false);
-  const finishPanelRef = useRef(null);
-  const userMovedRef = useRef(false);
-  const lastResumedLessonIdRef = useRef(null);
-  const handleQuizAnswerChange = (questionKey, answer) => {
-    setQuizAnswers((prev) => ({ ...prev, [questionKey]: answer }));
-  };
-
-  const handleCheckQuiz = (moduleId, questions) => {
-    const unanswered = questions.some((q, index) => {
-      const key = getQuizAnswerKey(moduleId, q, index);
-      return !String(quizAnswers[key] || '').trim();
-    });
-
-    if (unanswered) {
-      alert('Please answer every question before checking the quiz.');
-      return;
-    }
-
-    const result = scoreQuiz(questions, quizAnswers, moduleId);
-    setQuizResults((prev) => ({ ...prev, [String(moduleId)]: result }));
-    writeLocalProgressFlag('quiz_results', currentUser, moduleId, result);
-    if (studentId) {
-      supabase.from('module_progress').upsert({
-        student_id: String(studentId),
-        module_id: String(moduleId),
-        quiz_result: result,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'student_id,module_id' });
-    }
-  };
-
   const studentId = currentUser?.id || currentUser?.email || '';
-
-  useEffect(() => {
-    let cancelled = false;
-    allowCertificateAwardRef.current = false;
-    const lessonIdKey = currentLesson?.id;
-
-    if (lastResumedLessonIdRef.current !== lessonIdKey) {
-      userMovedRef.current = false;
-      lastResumedLessonIdRef.current = lessonIdKey;
-    }
-
-    function applyResume(readMap, watchMap, quizMap) {
-      if (userMovedRef.current) return;
-      const steps = buildLessonSteps(currentLesson?.modules || []);
-      if (steps.length === 0) return;
-      const firstIncomplete = steps.findIndex(
-        (step) => !isStepDoneInMaps(step, readMap, watchMap, quizMap) 
-      );
-      setVisibleStepIndex(firstIncomplete === -1 ? steps.length - 1 : firstIncomplete);
-    }
-
-    async function hydrateProgressAndResume() {
-      if (skipAutoResume) {
-        userMovedRef.current = true;
-        setVisibleStepIndex(Number.isFinite(resumeStepIndex) ? resumeStepIndex : 0);
-      }
-      if (!currentUser) return;
-
-      let localRead = {};
-      let localWatch = {};
-      let localQuiz = {};
-      let supabaseRead = {};
-      let didReadLocal = false;
-      let approvedResetAt = 0;
-      if (studentId) {
-        try {
-          const { data: resetRows } = await supabase
-            .from('course_restart_requests')
-            .select('reviewed_at, created_at')
-            .eq('student_id', String(currentUser.id))
-            .eq('course_id', String(course?.id || courseId || ''))
-            .eq('status', 'approved')
-            .order('reviewed_at', { ascending: false })
-            .limit(1);
-          const resetAt = new Date(resetRows?.[0]?.reviewed_at || resetRows?.[0]?.created_at || 0).getTime();
-          if (resetRows?.length) approvedResetAt = resetAt;
-          if (resetRows?.length && course) clearLocalCourseProgress(currentUser, course);
-
-          localRead = readLocalProgressMap('read_modules', currentUser);
-          localWatch = readLocalProgressMap('watched_videos', currentUser);
-          localQuiz = readLocalProgressMap('quiz_results', currentUser);
-          didReadLocal = true;
-
-          if (!cancelled) {
-            setReadModules(localRead);
-            setWatchedVideos(localWatch);
-            setQuizResults(localQuiz);
-            applyResume(localRead, localWatch, localQuiz);
-          }
-
-          const { data, error } = await supabase
-            .from('module_progress')
-            .select('module_id, is_read, is_watched, is_submitted, quiz_result, updated_at')
-            .eq('student_id', String(studentId));
-          const kept = (data || []).filter((row) => {
-            if (!resetRows?.length) return true;
-            return new Date(row.updated_at || 0).getTime() > resetAt;
-          });
-
-          if (!error && kept) {
-            const watched = {};
-            const submitted = {};
-            const quizzes = {};
-            supabaseRead = kept.reduce((acc, item) => {
-              const moduleKey = String(item.module_id);
-              if (item.is_read) acc[moduleKey] = true;
-              if (item.is_watched) watched[moduleKey] = true;
-              if (item.is_submitted) submitted[moduleKey] = true;
-              if (item.quiz_result) quizzes[moduleKey] = item.quiz_result;
-              return acc;
-            }, {});
-            if (!cancelled) {
-              setWatchedVideos({ ...localWatch, ...watched });
-              setQuizResults({ ...localQuiz, ...quizzes });
-              Object.entries(submitted).forEach(([moduleKey, value]) => {
-                writeLocalProgressFlag('submitted_modules', currentUser, moduleKey, value);
-              });
-            }
-          }
-        } catch (err) {
-          console.error('Failed to load module progress:', err);
-          if (!didReadLocal) {
-            localRead = readLocalProgressMap('read_modules', currentUser);
-            localWatch = readLocalProgressMap('watched_videos', currentUser);
-            localQuiz = readLocalProgressMap('quiz_results', currentUser);
-          }
-        }
-      }
-
-      if (cancelled) return;
-
-      const nextRead = { ...localRead, ...supabaseRead };
-      allowCertificateAwardRef.current = false;
-      setCourseResetAt(approvedResetAt);
-      setProgressReady((ready) => ready + 1);
-      setReadModules(nextRead);
-      applyResume(nextRead, localWatch, localQuiz);
-    }
-
-    hydrateProgressAndResume();
-    return () => {
-      cancelled = true;
-    };
-  }, [currentLesson?.id, currentUser?.id, currentUser?.email, studentId, skipAutoResume, resumeStepIndex]);
-
   const activeCourseId = courseId || course?.id;
   const activeLessonId = lessonId || currentLesson?.id;
 
-  useEffect(() => {
-    async function loadDbSubmissions() {
-      try {
-        const subs = await fetchAllSubmissions();
-        setDbSubmissions(subs);
-      } catch (err) {
-        console.error('Failed to load database submissions:', err);
-      }
-    }
-    loadDbSubmissions();
-  }, [activeCourseId, activeLessonId]);
+  const {
+    readModules,
+    quizAnswers,
+    quizResults,
+    visibleStepIndex,
+    setVisibleStepIndex,
+    watchedVideos,
+    finishNotice,
+    setFinishNotice,
+    finishScrollTick,
+    setFinishScrollTick,
+    courseResetAt,
+    progressReady,
+    allowCertificateAwardRef,
+    finishPanelRef,
+    userMovedRef,
+    handleQuizAnswerChange,
+    handleCheckQuiz,
+    toggleMarkRead,
+    toggleMarkWatched
+  } = useLessonProgress({
+    currentLesson,
+    currentUser,
+    course,
+    courseId,
+    studentId,
+    resumeStepIndex,
+    skipAutoResume,
+    setCourses
+  });
 
   const modules = useMemo(() => currentLesson?.modules || [], [currentLesson]);
   const lessonSteps = useMemo(() => buildLessonSteps(modules), [modules]);
+
+  const {
+    submissionInputs,
+    activeSubmissions,
+    submissionLookup,
+    hasPassedAssignment,
+    handleInputChange,
+    handleSubmitAssignment
+  } = useLessonSubmissions({
+    activeCourseId,
+    activeLessonId,
+    course,
+    courseId,
+    lessonId,
+    courseResetAt,
+    currentUser,
+    currentLesson,
+    modules,
+    studentId
+  });
 
   const nextLesson = useMemo(() => {
     if (!course?.lessons || !Array.isArray(course.lessons)) return null;
@@ -363,92 +119,6 @@ export default function LessonView({
       .replace(/^#{1,6}\s+/gm, '')
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)');
   };
-
-  const activeSubmissions = useMemo(() => {
-    if (!courseResetAt) return dbSubmissions;
-    const moduleIds = new Set(getCourseModules(course).map((mod) => String(mod.id)));
-    const courseKey = String(course?.id || courseId || '');
-    return dbSubmissions.filter((sub) => {
-      const sameCourse = (courseKey && String(sub.course_id || '') === courseKey)
-        || moduleIds.has(String(sub.module_id || ''));
-      if (!sameCourse) return true;
-      return submissionSavedAt(sub) > courseResetAt;
-    });
-  }, [dbSubmissions, courseResetAt, course, courseId]);
-
-  const submissionLookup = useMemo(() => {
-    const map = new Map();
-    const email = currentUser?.email ? String(currentUser.email).toLowerCase() : '';
-    const id = currentUser?.id ? String(currentUser.id).toLowerCase() : '';
-
-    modules.forEach((mod) => {
-      if (isReadingModule(mod)) return;
-
-      const modKey = String(mod.id);
-
-      const foundDbSub = activeSubmissions.find((sub) => {
-        if (String(sub.module_id) !== modKey) return false;
-        const subStudent = String(sub.student_id || sub.studentEmail || sub.student || '').toLowerCase();
-        return (email && subStudent === email) || (id && subStudent === id);
-      });
-
-      if (foundDbSub) {
-        map.set(modKey, foundDbSub);
-        return;
-      }
-
-      if (!courseResetAt && Array.isArray(mod.submissions)) {
-        const sub = mod.submissions.find((s) => {
-          const subEmail = String(s.studentEmail || s.student_email || s.student || '').toLowerCase();
-          const subId = String(s.studentId || s.student_id || '').toLowerCase();
-          return (email && subEmail === email) || (id && subId === id);
-        });
-        if (sub) {
-          map.set(modKey, sub);
-        }
-      }
-    });
-
-    return map;
-  }, [modules, currentUser, activeSubmissions, courseResetAt]);
-
-  const hasSubmittedAssignment = useCallback(
-    (mod) => {
-      const sub = submissionLookup.get(String(mod.id));
-      const url = sub?.submission_url || sub?.submissionUrl || sub?.link || sub?.url;
-      return Boolean(url);
-    },
-    [submissionLookup]
-  );
-
-  const hasPassedAssignment = useCallback(
-    (mod) => {
-      const sub = submissionLookup.get(String(mod.id));
-      return isStatusPassing(sub?.status);
-    },
-    [submissionLookup]
-  );
-
-  // Student can continue when this portion is done (read, quiz, or submitted).
-  // Mentor "pass" is separate and still shows as Pending until graded.
-  const isModulePassed = useCallback(
-    (mod) => {
-      const modIdStr = String(mod.id);
-      const quizItems = getModuleQuizItems(mod);
-      const quizResult = quizResults[modIdStr];
-
-      if (quizItems.length > 0 && !quizResult?.passed) {
-        return false;
-      }
-
-      if (isReadingModule(mod)) {
-        return !!readModules[modIdStr];
-      }
-
-      return hasPassedAssignment(mod);
-    },
-    [readModules, quizResults, hasPassedAssignment]
-  );
 
   const isStepComplete = useCallback(
     (step) => {
@@ -470,7 +140,7 @@ export default function LessonView({
         return hasPassedAssignment(step.mod);
       }
       return false;
-    }, 
+    },
     [readModules, watchedVideos, quizResults, hasPassedAssignment]
   );
 
@@ -480,6 +150,10 @@ export default function LessonView({
   }, [lessonSteps, isStepComplete]);
 
   const earnedCertificates = useMemo(() => {
+    void readModules;
+    void watchedVideos;
+    void quizResults;
+    void certificateStamp;
     return getEarnedCertificates(course, currentUser, activeSubmissions);
   }, [course, currentUser, activeSubmissions, readModules, watchedVideos, quizResults, certificateStamp]);
 
@@ -498,24 +172,26 @@ export default function LessonView({
   useEffect(() => {
     if (!progressReady) return;
     if (!isLessonComplete) allowCertificateAwardRef.current = true;
-  }, [progressReady, isLessonComplete]);
+  }, [progressReady, isLessonComplete, allowCertificateAwardRef]);
 
   useEffect(() => {
     if (!progressReady || !allowCertificateAwardRef.current || !isLessonComplete || !currentLesson || !currentUser) return;
     stampCertificateDate(currentUser, lessonCertificateId(course, currentLesson));
     const earned = getEarnedCertificates(course, currentUser, activeSubmissions);
     if (earned.course) stampCertificateDate(currentUser, earned.course.id);
+    // The date is stored outside React. This updates the screen so the certificate can render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCertificateStamp(Date.now());
-  }, [progressReady, isLessonComplete, currentLesson, currentUser, course, activeSubmissions]);
+  }, [progressReady, isLessonComplete, currentLesson, currentUser, course, activeSubmissions, allowCertificateAwardRef]);
 
   useEffect(() => {
     if (isLessonComplete) setFinishNotice('');
-  }, [isLessonComplete]);
+  }, [isLessonComplete, setFinishNotice]);
 
   useEffect(() => {
     if (!finishScrollTick) return;
     finishPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [finishScrollTick]);
+  }, [finishScrollTick, finishPanelRef]);
 
   const handleProceedToNextLesson = () => {
     if (!nextLesson || !isLessonComplete) return;
@@ -524,93 +200,6 @@ export default function LessonView({
     window.scrollTo({ top: 0, behavior: 'smooth' });
     if (typeof onSelectLesson === 'function') {
       onSelectLesson(nextLesson);
-    }
-  };
-
-  const toggleMarkRead = async (modId) => {
-    const strModId = String(modId);
-    const nextReadState = !readModules[strModId];
-    
-    setReadModules((prev) => ({ ...prev, [strModId]: nextReadState }));
-    writeLocalProgressFlag('read_modules', currentUser, strModId, nextReadState);
-
-    if (studentId) {
-      await supabase.from('module_progress').upsert({
-        student_id: String(studentId),
-        module_id: strModId,
-        is_read: nextReadState,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'student_id,module_id' });
-    }
-    
-    if (typeof setCourses === 'function') {
-      setCourses((prevCourses) => [...prevCourses]);
-    }
-  };
-
-  const toggleMarkWatched = (modId) => {
-    const strModId = String(modId);
-    const nextWatched = !watchedVideos[strModId];
-
-    setWatchedVideos((prev) => ({ ...prev, [strModId]: nextWatched }));
-    writeLocalProgressFlag('watched_videos', currentUser, strModId, nextWatched);
-    if (studentId) {
-      supabase.from('module_progress').upsert({
-        student_id: String(studentId),
-        module_id: strModId,
-        is_watched: nextWatched,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'student_id,module_id' });
-    }
-  };
-
-  const handleInputChange = (modId, value) => {
-    setSubmissionInputs((prev) => ({
-      ...prev,
-      [String(modId)]: value
-    }));
-  };
-
-  const handleSubmitAssignment = async (moduleId, linkValue) => {
-    const trimmedLink = linkValue?.trim();
-    if (!trimmedLink) {
-      alert('Please enter a valid URL or response.');
-      return;
-    }
-
-    const userId = studentId || 'student_id';
-    const userEmail = currentUser?.email || 'student@test.com';
-
-    try {
-      const savedSub = await submitAssignment({
-        studentId: userId,
-        studentEmail: userEmail,
-        courseId: courseId || course.id,
-        lessonId: lessonId || currentLesson.id,
-        moduleId: moduleId,
-        submissionUrl: trimmedLink
-      });
-
-      setDbSubmissions((prev) => [
-        savedSub,
-        ...prev.filter(
-          (s) =>
-            String(s.module_id) !== String(moduleId) ||
-            String(s.student_id).toLowerCase() !== String(userId).toLowerCase()
-        )
-      ]);
-
-      writeLocalProgressFlag('submitted_modules', currentUser, moduleId, true);
-      await supabase.from('module_progress').upsert({
-        student_id: String(userId),
-        module_id: String(moduleId),
-        is_submitted: true,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'student_id,module_id' });
-      alert('Assignment submitted successfully!');
-    } catch (err) {
-      alert('Failed to submit assignment. Check console.');
-      console.error(err);
     }
   };
 
@@ -627,23 +216,14 @@ export default function LessonView({
 
   return (
     <div style={{ color: '#fff', padding: '10px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <button onClick={onBack} style={{ background: '#1f2937', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}>
-          ← Back to Courses
-        </button>
-      </div>
-
-      <div style={{ marginBottom: '24px' }}>
-        <h2 style={{ fontSize: '28px', fontWeight: 'bold', margin: '0 0 4px 0' }}>{course.title}</h2>
-        <h3 style={{ fontSize: '20px', color: '#f97316', margin: 0 }}>{currentLesson.title}</h3>
-        {lessonSteps.length > 0 && (
-          <p style={{ margin: '8px 0 0 0', color: '#9ca3af', fontSize: '14px' }}>
-            Portion {Math.min(visibleStepIndex + 1, lessonSteps.length)} of {lessonSteps.length}
-            {' · '}
-            {lessonSteps.filter((step) => isStepComplete(step)).length} completed
-          </p>
-        )}
-      </div>
+      <LessonHeader
+        courseTitle={course.title}
+        lessonTitle={currentLesson.title}
+        stepNumber={Math.min(visibleStepIndex + 1, lessonSteps.length)}
+        stepCount={lessonSteps.length}
+        completedCount={lessonSteps.filter((step) => isStepComplete(step)).length}
+        onBack={onBack}
+      />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
         {lessonSteps[visibleStepIndex] && (() => {
@@ -655,11 +235,11 @@ export default function LessonView({
 
           const moduleMarkdown =
             mod.content || mod.body || mod.markdown || mod.details || mod.text || '';
-          const videoUrl = 
-          mod.assignment?.instructionsVideoUrl ||
-          mod.video_url ||
-          mod.videoUrl ||
-          '';
+          const videoUrl =
+            mod.assignment?.instructionsVideoUrl ||
+            mod.video_url ||
+            mod.videoUrl ||
+            '';
           const embedUrl = getVideoEmbedUrl(videoUrl);
 
           const userSub = submissionLookup.get(modIdStr);
@@ -681,14 +261,14 @@ export default function LessonView({
             }
 
             if (!isLessonComplete) {
-              const stillOpen = lessonSteps.filter((step) => !isStepComplete(step));
+              const stillOpen = lessonSteps.filter((item) => !isStepComplete(item));
               const labels = stillOpen.map(
-                (step) => `${cleanMarkdownText(step.mod.title) || 'Portion'} (${step.kind})`
+                (item) => `${cleanMarkdownText(item.mod.title) || 'Portion'} (${item.kind})`
               );
               setFinishNotice(
                 labels.length
                   ? `Finish is waiting on: ${labels.join(', ')}`
-                  : `This lesson still has unfinished portions.`
+                  : 'This lesson still has unfinished portions.'
               );
               setFinishScrollTick((tick) => tick + 1);
               return;
@@ -712,298 +292,72 @@ export default function LessonView({
             visibleStepIndex > 0 &&
             String(lessonSteps[visibleStepIndex - 1].mod.id) ===
               String(lessonSteps[visibleStepIndex].mod.id);
+
           return (
-            <div
+            <LessonStepFrame
               key={`${modIdStr}-${step.kind}`}
-              style={{ background: '#111827', border: '1px solid #374151', borderRadius: '12px', padding: '24px' }}
+              title={cleanMarkdownText(mod.title) || 'Module'}
+              kind={step.kind}
+              done={stepDone}
+              canGoBack={canBackSameModule}
+              isLast={visibleStepIndex >= lessonSteps.length - 1}
+              lessonComplete={isLessonComplete}
+              onBack={handleBackStep}
+              onContinue={handleContinue}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h4 style={{ fontSize: '20px', fontWeight: 'bold', margin: 0 }}>
-                  {cleanMarkdownText(mod.title) || 'Module'} - {step.kind}
-                </h4>
-                <span style={{
-                  fontSize: '12px',
-                  padding: '4px 10px',
-                  borderRadius: '12px',
-                  background: stepDone ? 'rgba(16, 185, 129, 0.2)' : 'rgba(249, 115, 22, 0.2)',
-                  color: stepDone ? '#10b981' : '#fb923c'
-                }}
-                >
-                  {stepDone ? 'Completed' : 'In Progress'}
-                </span>
-              </div>
-
               {step.kind === 'reading' && (
-                <>
-                  <div
-                    className='module-markdown'
-                    style={{ background: '#030712', border: '1px solid #1f2937', padding: '20px', borderRadius: '8px', marginBottom: '16px', color: '#e5e7eb' }}
-                  >
-                    <MarkdownPreview markdown={moduleMarkdown} showHeader={false} />
-                  </div>
-                  <button
-                      onClick={() => toggleMarkRead(mod.id)}
-                      style={{
-                        background: isRead ? '#10b981' : '#374151',
-                        color: '#fff',
-                        border: 'none',
-                        padding: '10px 20px',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: 'bold'
-                      }}
-                    >
-                      {isRead ? '✓ Material Read (Completed)' : 'Mark Material as Read'}
-                    </button>
-                </>
-              )}
-
-              {step.kind === 'video' && (
-                <>
-                  <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: '8px', marginBottom: '16px' }}>
-                    <iframe
-                      src={embedUrl}
-                      title='Lesson video'
-                      allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
-                      allowFullScreen
-                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 0 }}
-                      />
-                  </div>
-                  <button
-                      onClick={() => toggleMarkWatched(mod.id)}
-                      style={{
-                        background: watchedVideos[modIdStr] ? '#10b981' : '#374151',
-                        color: '#fff',
-                        border: 'none',
-                        padding: '10px 20px',
-                        borderRadius: '6px',
-                        cursor: 'pointer',
-                        fontWeight: 'bold'
-                      }}
-                    >
-                      {watchedVideos[modIdStr] ? '✓ Video Watched (Completed)' : 'Mark Video as Watched'}
-                    </button>
-                </>
-              )}
-
-              {step.kind === 'assignment' && (
-                <>
-                  {embedUrl && (
-                    <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', borderRadius: '8px', marginBottom: '16px' }}>
-                      <iframe
-                      src={embedUrl}
-                      title='Assignment instruction video'
-                      allow='accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
-                      allowFullScreen
-                      style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 0 }}
-                      />
-                    </div>
-                  )}
-                  {repoUrl && (
-                    <div style={{ background: '#1e293b', border: '1px solid #475569', padding: '14px 18px', borderRadius: '8px', marginBottom: '16px' }}>
-                      <span style={{ fontSize: '13px', color: '#94a3b8', display: 'block', marginBottom: '4px' }}>
-                        Starter Repository (clone this):
-                      </span>
-                      <a href={repoUrl} target='_blank' rel='noopener noreferrer' style={{ color: '#38bdf8', wordBreak: 'break-all' }}>
-                        {repoUrl}
-                      </a>
-                    </div>
-                  )}
-                  {assignmentPrompt && (
-                    <div style={{ background: '#1e293b', border: '1px solid #334155', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
-                      <h5 style={{ color: '#f97316', margin: '0 0 8px 0' }}>Instructions & Prompt</h5>
-                      <div style={{ whiteSpace: 'pre-wrap', fontSize: '14px' }}>{assignmentPrompt}</div>
-                    </div>
-                  )}
-                  <div style={{ background: '#1e293b', padding: '18px', borderRadius: '8px', border: '1px solid #334155'}}>
-                      <h5 style={{ margin: '0 0 10px 0', color: '#f97316' }}>Assignment Submission</h5>
-                      <input
-                        type="text"
-                        placeholder="Paste your Github repo link here..."
-                        value={currentInputValue}
-                        onChange={(e) => handleInputChange(mod.id, e.target.value)}
-                        style={{
-                          width: '100%',
-                          background: '#0f172a',
-                          border: '1px solid #475569',
-                          borderRadius: '6px',
-                          color: '#fff',
-                          padding: '10px 14px',
-                          marginBottom: '10px'
-                        }}
-                      />
-                      <button
-                        onClick={() => handleSubmitAssignment(mod.id, currentInputValue)}
-                        style={{
-                          background: 'linear-gradient(to right, #f97316, #ec4899)',
-                          border: 'none',
-                          color: '#fff',
-                          fontWeight: 'bold',
-                          padding: '10px 20px',
-                          borderRadius: '6px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {hasExistingSubmission ? 'Resubmit' : 'Submit Assignment'}
-                      </button>
-                      {hasExistingSubmission && (
-                        <p style={{
-                          margin: '12px 0 0 0',
-                          fontSize: '13px',
-                          color: hasPassedAssignment(mod)
-                            ? '#34d399'
-                            : isStatusFailing(submissionLookup.get(modIdStr)?.status)
-                              ? '#f87171'
-                              : '#fbbf24'
-                        }}>
-                          {hasPassedAssignment(mod)
-                            ? 'Passed - you can finish this lesson.'
-                            : isStatusFailing(submissionLookup.get(modIdStr)?.status)
-                              ? 'Needs revision. Update your repo and submit.'
-                              : 'Submitted. Waiting for mentor/admin feedback before you can finish.'}
-                        </p>
-                      )}
-                    </div>
-                </>
-              )}
-
-              {step.kind === 'quiz' && (
-                <div style={{ background: '#1e293b', padding: '18px', borderRadius: '18px' }}>
-                  <h5 style={{ color: '#f97316', margin: '0 0 12px 0' }}>Quiz Questions</h5>
-                  {quizItems.map((q, qIdx) => {
-                    const questionKey = getQuizAnswerKey(modIdStr, q, qIdx);
-                    return (
-                      <StudentQuizQuestion
-                        key={questionKey}
-                        question={q}
-                        answer={quizAnswers[questionKey] || ''}
-                        groupName={questionKey}
-                        onChange={(value) => handleQuizAnswerChange(questionKey, value)}
-                      />
-                    );
-                  })}
-                  <div style={{ marginTop: '12px' }}>
-                      <button
-                        type='button'
-                        onClick={() => handleCheckQuiz(modIdStr, quizItems)}
-                        style={{
-                          background: '#f97316',
-                          color: '#fff',
-                          border: 'none',
-                          padding: '10px 20px', 
-                          borderRadius: '6px', 
-                          cursor: 'pointer', 
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        {quizResult ? 'Retake / Check Again' : 'Check Quiz'}
-                      </button>
-                      {quizResult && (
-                        <p style={{ marginTop: '10px', color: quizResult.passed ? '#34d399' : '#f87171' }}>
-                          Score: {quizResult.correct}/{quizResult.total} ({quizResult.percent}%).
-                          {quizResult.passed ? 'Passed!' : `Need ${QUIZ_PASSING_PERCENT}% to pass.`}
-                        </p>
-                      )}
-                    </div>
-                </div>
-              )}
-
-              <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  {canBackSameModule ? (
-                    <button
-                      type='button'
-                      onClick={handleBackStep}
-                      style={{
-                        background: '#1f2937', 
-                        color: '#fff',
-                        border: '1px solid #374151',
-                        padding: '10px 20px', 
-                        borderRadius: '6px',
-                        fontWeight: 'bold', 
-                        cursor: 'pointer'
-                      }}
-                    >
-                      ← Back
-                    </button>
-                  ) : (
-                    <span />
-                  )}
-                  <button
-                    type='button'
-                    disabled={!stepDone}
-                    onClick={handleContinue}
-                    style={{
-                      background: stepDone ? '#f97316' : '#374151',
-                      color: '#fff', 
-                      border: 'none',
-                      padding: '10px 20px', 
-                      borderRadius: '6px',
-                      fontWeight: 'bold',
-                      cursor: stepDone ? 'pointer' : 'not-allowed'
-                    }}
-                  >
-                    {visibleStepIndex < lessonSteps.length - 1
-                      ? 'Continue →'
-                      : isLessonComplete
-                        ? 'View certificate' 
-                        : 'Finish'}
-                    </button>
-                </div>
-            </div>
-        );
-        })()}
-        
-        {(finishNotice || lessonCert) && (
-          <div ref={finishPanelRef} style={{ display: 'grid', gap: '14px', marginTop: '10px', justifyItems: 'center' }}>
-            {finishNotice && <p className='finish-notice'>{finishNotice}</p>}
-            {lessonCert && (
-              <>
-                <CertificateCard
-                  kind='lesson'
-                  title={cleanMarkdownText(lessonCert.title)}
-                  courseTitle={lessonCert.courseTitle}
-                  studentName={getDisplayName(currentUser)}
-                  academyName={getAcademySettings().academyName}
-                  earnedOn={lessonCert.earnedOn}
+                <ReadingStep
+                  markdown={moduleMarkdown}
+                  isRead={isRead}
+                  onToggleRead={() => toggleMarkRead(mod.id)}
                 />
-                {courseCert && (
-                  <CertificateCard
-                    kind='course'
-                    title={courseCert.title}
-                    studentName={getDisplayName(currentUser)}
-                    academyName={getAcademySettings().academyName}
-                    earnedOn={courseCert.earnedOn}
-                  />
-                )}
-                <p style={{ margin: 0, width: '100%', color: '#9ca3af', fontSize: '14px' }}>
-                  {courseCert
-                    ? 'You finished this course. Both certificates are saved on your Progress tab.'
-                    : nextLesson
-                      ? `Next up: ${nextLesson.title}. This certificate is saved on your Progress tab.`
-                      : 'This certificate is saved on your Progress tab.' }
-                </p>
-                <div className='certificate-actions'>
-                  {nextLesson && (
-                    <button
-                      type='button'
-                      onClick={handleProceedToNextLesson}
-                      style={{ background: '#f97316', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
-                    >
-                      Next Lesson →
-                    </button>
-                  )}
-                  <button
-                    type='button'
-                    onClick={onBack}
-                    style={{ background: '#10b981', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer' }}
-                  >
-                    Back to Course Menu
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
+              )}
+              {step.kind === 'video' && (
+                <VideoStep
+                  embedUrl={embedUrl}
+                  isWatched={!!watchedVideos[modIdStr]}
+                  onToggleWatched={() => toggleMarkWatched(mod.id)}
+                />
+              )}
+              {step.kind === 'assignment' && (
+                <AssignmentStep
+                  embedUrl={embedUrl}
+                  repoUrl={repoUrl}
+                  prompt={assignmentPrompt}
+                  linkValue={currentInputValue}
+                  hasSubmission={hasExistingSubmission}
+                  passed={hasPassedAssignment(mod)}
+                  needsRevision={isStatusFailing(submissionLookup.get(modIdStr)?.status)}
+                  onLinkChange={(value) => handleInputChange(mod.id, value)}
+                  onSubmit={() => handleSubmitAssignment(mod.id, currentInputValue)}
+                />
+              )}
+              {step.kind === 'quiz' && (
+                <QuizStep
+                  moduleId={modIdStr}
+                  questions={quizItems}
+                  answers={quizAnswers}
+                  result={quizResult}
+                  onAnswer={handleQuizAnswerChange}
+                  onCheck={() => handleCheckQuiz(modIdStr, quizItems)}
+                />
+              )}
+            </LessonStepFrame>
+          );
+        })()}
+
+        <LessonFinishPanel
+          finishNotice={finishNotice}
+          finishPanelRef={finishPanelRef}
+          lessonCert={lessonCert}
+          courseCert={courseCert}
+          lessonCertTitle={lessonCert ? cleanMarkdownText(lessonCert.title) : ''}
+          studentName={getDisplayName(currentUser)}
+          academyName={getAcademySettings().academyName}
+          nextLessonTitle={nextLesson ? nextLesson.title : ''}
+          onNextLesson={handleProceedToNextLesson}
+          onBack={onBack}
+        />
       </div>
     </div>
   );
